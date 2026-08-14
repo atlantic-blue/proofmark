@@ -75,6 +75,16 @@ jobs:
               echo "No rival was found for $picture. Nothing below this point would be true."
               exit 1
             fi
+            dated=$(node -e "process.stdout.write(String(JSON.parse(require('fs').readFileSync('$picture','utf8')).ads.filter(a => a.daysLive !== null).length))")
+            echo "  of those, $dated carry a run length"
+            # A page can show the right number of advertisements, an empty chart
+            # and "dates not given" against every hook, and look healthy. That is
+            # what happens when the library writes its dates in an order the
+            # parser does not read, which depends on where the runner sits.
+            if [ "$ads" -gt 0 ] && [ "$dated" -lt $((ads / 2)) ]; then
+              echo "Fewer than half the advertisements carry a date. The chart would be empty."
+              exit 1
+            fi
             total=$((total + ads))
           done
           if [ "$total" -eq 0 ]; then
