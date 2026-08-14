@@ -1,0 +1,10 @@
+node_modules/
+out/
+
+# The repository is public, so the code is public and our data is not.
+# Every product file is ignored except the worked example, because a product
+# file names a product and the words we are going after. Hush Log is already
+# listed on the App Store, so it reveals nothing, and it keeps the repository
+# runnable straight after a clone.
+products/*.json
+!products/hush-log.json

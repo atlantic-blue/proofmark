@@ -1,0 +1,11 @@
+{
+  "name": "proofmark",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "node --experimental-strip-types --test src/*.test.ts",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": { "puppeteer-core": "^23.0.0" },
+  "devDependencies": { "typescript": "^5.7.0", "@types/node": "^24.0.0" }
+}
