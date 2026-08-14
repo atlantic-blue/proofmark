@@ -2,7 +2,11 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
   brandOf,
+  cardsByLibraryId,
   firstRealLine,
+  formatOf,
+  libraryUrlFor,
+  mediaIn,
   daysBetween,
   keywordSearchUrl,
   matchAdvertiser,
@@ -221,4 +225,84 @@ test("a video player readout is never taken for the advertisement copy", () => {
   assert.equal(firstRealLine(["", "  ", "12:05", "Real copy here"]), "Real copy here");
   assert.equal(firstRealLine(["0:00 / 0:37"]), "");
   assert.equal(firstRealLine(["Have you been told you snore?"]), "Have you been told you snore?");
+});
+
+
+/** Trimmed from the real markup of a SnoreLab card captured on 2026-08-14. */
+const CARD_HTML = `<div><span>Inactive</span><span>Library ID: 1893577217926189</span>
+<span>30 Dec 2025 - 8 Jan 2026</span><div aria-label="Video player"><video></video></div>
+<img src="https://scontent-lhr8-1.xx.fbcdn.net/v/t39.35426/creative.jpg?stp=abc&amp;oe=1"/>
+<div style="mask-image: url(&quot;https://static.xx.fbcdn.net/rsrc.php/yI/r/X0TjgD40yif.webp&quot;);"></div>
+</div><div><span>Active</span><span>Library ID: 1573380140661000</span>
+<img src="https://scontent-lhr6-2.xx.fbcdn.net/v/t45.1600/still.png"/></div>`;
+
+test("every advertisement gets its permanent library link", () => {
+  assert.equal(
+    libraryUrlFor("1893577217926189"),
+    "https://www.facebook.com/ads/library/?id=1893577217926189",
+  );
+});
+
+test("the markup is sliced into one card per advertisement", () => {
+  const cards = cardsByLibraryId(CARD_HTML);
+  assert.deepEqual([...cards.keys()], ["1893577217926189", "1573380140661000"]);
+  assert.match(cards.get("1893577217926189") ?? "", /Video player/);
+  // The second card must not inherit the first card's video marker.
+  assert.doesNotMatch(cards.get("1573380140661000") ?? "", /Video player/);
+});
+
+test("format is read per card, so a video advertisement is not called an image", () => {
+  const cards = cardsByLibraryId(CARD_HTML);
+  assert.equal(formatOf(cards.get("1893577217926189") ?? ""), "video");
+  assert.equal(formatOf(cards.get("1573380140661000") ?? ""), "image");
+  assert.equal(formatOf("<div>nothing here</div>"), "text or unknown");
+});
+
+test("creative files are captured and page furniture is not", () => {
+  const media = mediaIn(cardsByLibraryId(CARD_HTML).get("1893577217926189") ?? "");
+  assert.ok(media.some((url) => url.includes("creative.jpg")));
+  // static.xx.fbcdn.net serves the library's own icons, never a rival's creative.
+  assert.ok(!media.some((url) => url.includes("static.xx.fbcdn.net")));
+  assert.ok(media.every((url) => !url.includes("&amp;")), "html entities must be decoded");
+});
+
+test("parseAds carries the link, the format and the creative through", () => {
+  const ads = parseAds(
+    `Inactive
+Library ID: 1893577217926189
+30 Dec 2025 - 8 Jan 2026
+Platforms
+7 ads use this creative and text
+See summary details
+SnoreLab
+Sponsored
+Have you been told you snore?
+`,
+    READ_AT,
+    CARD_HTML,
+  );
+  assert.equal(ads[0]?.libraryUrl, "https://www.facebook.com/ads/library/?id=1893577217926189");
+  assert.equal(ads[0]?.format, "video");
+  assert.ok((ads[0]?.mediaUrls.length ?? 0) > 0);
+});
+
+test("an advertisement with no caption never outranks one with words", () => {
+  const captioned = parseAds(ADVERTISER_VIEW, READ_AT);
+  const silent = parseAds(
+    `Active
+Library ID: 99
+1 Jan 2026 - 14 Aug 2026
+Platforms
+500 ads use this creative and text
+See summary details
+ShutEye
+Sponsored
+\u200b
+`,
+    READ_AT,
+  );
+  const hooks = rankHooks([...silent, ...captioned]);
+  assert.ok(hooks[0]?.copy.length ?? 0 > 0, "a sentence must lead, not an empty group");
+  const nameless = hooks.find((hook) => hook.copy.length === 0);
+  assert.equal(nameless?.creatives, 500, "the silent group is still reported, just not first");
 });

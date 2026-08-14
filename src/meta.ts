@@ -15,7 +15,7 @@
  * second gives an end, so only the second gives a finished length of run.
  */
 
-import type { Ad, Platform, ProvenHook } from "./types.ts";
+import type { Ad, AdFormat, Platform, ProvenHook } from "./types.ts";
 
 export const META: Platform = "meta";
 
@@ -102,7 +102,54 @@ export function firstRealLine(bodyLines: readonly string[]): string {
   return (line ?? "").slice(0, 200);
 }
 
-export function parseAds(pageText: string, readAt: Date = new Date()): Ad[] {
+/**
+ * Every advertisement has a permanent page in the library, so a reader can go
+ * and look at the thing rather than take a summary on trust.
+ */
+export function libraryUrlFor(libraryId: string): string {
+  return `https://www.facebook.com/ads/library/?id=${libraryId}`;
+}
+
+/**
+ * The creative files served with a card. They come from a content host and they
+ * expire, so they are a snapshot taken on the day and not an archive. Chrome
+ * assets are served from static.xx.fbcdn.net and are not creative.
+ */
+const MEDIA_URL = /https:\/\/(?!static\.)[^"'\\ )]*?(?:fbcdn|scontent)[^"'\\ )]*?\.(?:mp4|jpg|jpeg|png|webp)[^"'\\ )]*/g;
+
+const VIDEO_MARKERS = [/aria-label="Video player"/, /aria-label="Play Video"/, /<video/];
+
+export function formatOf(cardHtml: string): AdFormat {
+  if (VIDEO_MARKERS.some((marker) => marker.test(cardHtml))) return "video";
+  if (/https:\/\/(?!static\.)[^"']*?scontent[^"']*?\.(?:jpg|jpeg|png|webp)/.test(cardHtml)) return "image";
+  return "text or unknown";
+}
+
+export function mediaIn(cardHtml: string): string[] {
+  const found = [...cardHtml.matchAll(MEDIA_URL)].map((match) => match[0].replace(/&amp;/g, "&"));
+  return [...new Set(found)].slice(0, 4);
+}
+
+/**
+ * Slices the markup into one piece per advertisement, keyed by library
+ * identifier, so the format and the creative can be read for each card rather
+ * than for the page as a whole.
+ */
+export function cardsByLibraryId(html: string): Map<string, string> {
+  const cards = new Map<string, string>();
+  const marker = /Library ID: (\d+)/g;
+  const hits = [...html.matchAll(marker)];
+  for (let index = 0; index < hits.length; index += 1) {
+    const hit = hits[index];
+    const id = hit?.[1];
+    if (!id || hit.index === undefined) continue;
+    const end = index + 1 < hits.length ? (hits[index + 1]?.index ?? html.length) : html.length;
+    cards.set(id, html.slice(hit.index, end));
+  }
+  return cards;
+}
+
+export function parseAds(pageText: string, readAt: Date = new Date(), html = ""): Ad[] {
   const marker = "Library ID: ";
   const positions: number[] = [];
   let cursor = pageText.indexOf(marker);
@@ -111,6 +158,7 @@ export function parseAds(pageText: string, readAt: Date = new Date()): Ad[] {
     cursor = pageText.indexOf(marker, cursor + marker.length);
   }
 
+  const cards = cardsByLibraryId(html);
   const ads: Ad[] = [];
   for (let index = 0; index < positions.length; index += 1) {
     const start = positions[index] as number;
@@ -136,9 +184,13 @@ export function parseAds(pageText: string, readAt: Date = new Date()): Ad[] {
     const bodyLines = sponsoredIndex >= 0 ? lines.slice(sponsoredIndex + 1) : [];
     const body = bodyLines.join("\n").replace(/​/g, "").trim();
 
+    const card = cards.get(libraryId) ?? "";
     ads.push({
       platform: META,
       libraryId,
+      libraryUrl: libraryUrlFor(libraryId),
+      format: formatOf(card),
+      mediaUrls: mediaIn(card),
       advertiserId: null,
       advertiser,
       startedRunning,
@@ -249,7 +301,11 @@ export function matchAdvertiser(
 export function rankHooks(ads: readonly Ad[]): ProvenHook[] {
   const groups = new Map<string, Ad[]>();
   for (const ad of ads) {
-    const key = `${ad.advertiser ?? "unknown"}::${ad.bodyFirstLine}`;
+    // A video advertisement often carries no caption at all, so its copy is
+    // empty. Those must not collapse into one nameless group that then tops the
+    // ranking with no sentence in it, which is what happened on the first run.
+    const copy = ad.bodyFirstLine.replace(/\u200b/g, "").trim();
+    const key = `${ad.advertiser ?? "unknown"}::${copy || `no caption:${ad.format}`}`;
     const list = groups.get(key) ?? [];
     list.push(ad);
     groups.set(key, list);
@@ -273,10 +329,15 @@ export function rankHooks(ads: readonly Ad[]): ProvenHook[] {
       .map((ad) => ad.daysLive)
       .filter((days): days is number => days !== null);
 
+    const copy = first.bodyFirstLine.replace(/\u200b/g, "").trim();
     hooks.push({
       platform: META,
       advertiser: first.advertiser ?? "unknown",
-      copy: first.bodyFirstLine,
+      copy,
+      formats: [...new Set(group.map((ad) => ad.format))].sort(),
+      exampleUrl: first.libraryUrl,
+      exampleMedia: group.flatMap((ad) => ad.mediaUrls).slice(0, 3),
+      runLengths: runLengths.slice().sort((left, right) => right - left),
       creatives: group.reduce((total, ad) => total + ad.creativeShareCount, 0),
       runs: group.length,
       longestRunDays: runLengths.length > 0 ? Math.max(...runLengths) : null,
@@ -287,6 +348,11 @@ export function rankHooks(ads: readonly Ad[]): ProvenHook[] {
   }
 
   return hooks.sort((left, right) => {
+    // A group with no words cannot be a hook, whatever was spent on it, so it
+    // never outranks a sentence somebody actually wrote.
+    const leftHasCopy = left.copy.length > 0;
+    const rightHasCopy = right.copy.length > 0;
+    if (leftHasCopy !== rightHasCopy) return leftHasCopy ? -1 : 1;
     if (right.creatives !== left.creatives) return right.creatives - left.creatives;
     return right.runs - left.runs;
   });

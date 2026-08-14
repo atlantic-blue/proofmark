@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { isOurOwnProduct, isRelevant, slugify } from "./apple.ts";
 import { findContainerIds, scan } from "./platforms.ts";
 import { summariseVoice, themesFor } from "./voice.ts";
-import { buildReport } from "./report.ts";
+import { buildReport, plural } from "./report.ts";
 import { validateProduct } from "./run.ts";
 import type { DistributionPicture, Product, Review } from "./types.ts";
 
@@ -113,12 +113,51 @@ const PICTURE: DistributionPicture = {
       activeAdCountAtLeast: 10,
     },
   ],
-  ads: [],
+  ads: [
+    {
+      platform: "meta",
+      libraryId: "1893577217926189",
+      libraryUrl: "https://www.facebook.com/ads/library/?id=1893577217926189",
+      format: "video",
+      mediaUrls: ["https://video-lhr11-1.xx.fbcdn.net/o1/v/t2/f2/m412/example.mp4"],
+      advertiserId: "149967288461419",
+      advertiser: "SnoreLab",
+      startedRunning: "30 Dec 2025",
+      ended: "8 Jan 2026",
+      daysLive: 10,
+      active: false,
+      creativeShareCount: 7,
+      bodyFirstLine: "Have you been told you snore?",
+      bodyChars: 29,
+      body: "Have you been told you snore?",
+    },
+    {
+      platform: "meta",
+      libraryId: "1573380140661000",
+      libraryUrl: "https://www.facebook.com/ads/library/?id=1573380140661000",
+      format: "image",
+      mediaUrls: [],
+      advertiserId: "149967288461419",
+      advertiser: "SnoreLab",
+      startedRunning: "1 Aug 2026",
+      ended: null,
+      daysLive: 14,
+      active: true,
+      creativeShareCount: 3,
+      bodyFirstLine: "Discover your BreathFlow",
+      bodyChars: 24,
+      body: "Discover your BreathFlow",
+    },
+  ],
   hooks: [
     {
       platform: "meta",
       advertiser: "SnoreLab",
       copy: "Have you been told you snore?",
+      formats: ["video"],
+      exampleUrl: "https://www.facebook.com/ads/library/?id=1893577217926189",
+      exampleMedia: ["https://video-lhr11-1.xx.fbcdn.net/o1/v/t2/f2/m412/example.mp4"],
+      runLengths: [15, 12, 9],
       creatives: 82,
       runs: 16,
       longestRunDays: 15,
@@ -216,15 +255,18 @@ test("a withheld rating count is never printed as zero, even beside a published 
   const mixed: DistributionPicture = {
     ...PICTURE,
     rivals: [
-      { ...first, rivalId: "cleanmymac", name: "CleanMyMac", ratingCount: 0 },
-      { ...first, rivalId: "status-monitor", name: "Status Monitor", ratingCount: 16 },
+      { ...first, rivalId: "snoregym", name: "SnoreGym", ratingCount: 0 },
+      { ...first, rivalId: "sound-sleep", name: "SoundSleep", ratingCount: 16 },
     ],
   };
   const report = buildReport(mixed);
-  assert.match(report, /CleanMyMac: Free, ratings not published/);
-  assert.match(report, /Status Monitor: Free, 16 ratings/);
+  assert.match(report, /SnoreGym: Free, ratings not published/);
+  assert.match(report, /SoundSleep: Free, 16 ratings/);
   assert.doesNotMatch(report, /0 ratings/);
-  assert.match(report, /no rating count for 1 of these 2 rivals/);
+  assert.match(report, /no rating count for 1 of these rivals/);
+  // The note must not name a product from another category. It once cited
+  // CleanMyMac inside a report about snoring applications.
+  assert.doesNotMatch(report, /CleanMyMac/);
 });
 
 test("a set where every count is published carries no withheld note", () => {
@@ -232,4 +274,65 @@ test("a set where every count is published carries no withheld note", () => {
   assert.match(report, /14065 ratings/);
   assert.doesNotMatch(report, /ratings not published/);
   assert.doesNotMatch(report, /publishes no rating count for/);
+});
+
+test("a count of one never reads as a plural, because a broken sentence loses the reader", () => {
+  assert.equal(plural(1, "advertisements", "advertisement"), "1 advertisement");
+  assert.equal(plural(2, "advertisements", "advertisement"), "2 advertisements");
+  assert.equal(plural(0, "advertisements", "advertisement"), "0 advertisements");
+
+  const single: DistributionPicture = {
+    ...PICTURE,
+    advertisers: [{ ...(PICTURE.advertisers[0] as (typeof PICTURE.advertisers)[number]), activeAdCountAtLeast: 1 }],
+    hooks: [{ ...(PICTURE.hooks[0] as (typeof PICTURE.hooks)[number]), creatives: 1, runs: 1 }],
+  };
+  const report = buildReport(single);
+  assert.match(report, /at least 1 active advertisement,/);
+  assert.match(report, /\*\*1 creative\*\*, 1 run,/);
+  assert.doesNotMatch(report, /1 advertisements|1 creatives|1 runs/);
+});
+
+test("an advertiser seen under several terms leads, and a matched rival is marked", () => {
+  const picture: DistributionPicture = {
+    ...PICTURE,
+    categoryAdvertisers: [
+      { platform: "meta", term: "snoring", name: "SnoreLab", advertiserId: "149967288461419", count: 10 },
+      { platform: "meta", term: "snore", name: "SnoreLab", advertiserId: "149967288461419", count: 8 },
+      { platform: "meta", term: "snoring", name: "Story-Time", advertiserId: "555", count: 10 },
+    ],
+  };
+  const report = buildReport(picture);
+  // Story-Time shows the same ten advertisements, so raw count cannot separate them.
+  assert.match(report, /SnoreLab \(a rival we track\): 2 terms, up to 10 advertisements/);
+  assert.doesNotMatch(report, /Story-Time: /);
+  assert.match(report, /remaining 1 advertiser appeared under one term/);
+});
+
+test("a category where nothing repeats across terms says so rather than showing nothing", () => {
+  const picture: DistributionPicture = {
+    ...PICTURE,
+    categoryAdvertisers: [
+      { platform: "meta", term: "snoring", name: "Story-Time", advertiserId: "555", count: 10 },
+    ],
+  };
+  assert.match(buildReport(picture), /No advertiser appeared under more than one term/);
+});
+
+test("more terms outranks a bigger count, because breadth is the category signal", () => {
+  const picture: DistributionPicture = {
+    ...PICTURE,
+    advertisers: [],
+    categoryAdvertisers: [
+      { platform: "meta", term: "snoring", name: "Broad", advertiserId: "1", count: 2 },
+      { platform: "meta", term: "snore", name: "Broad", advertiserId: "1", count: 2 },
+      { platform: "meta", term: "sleep recorder", name: "Broad", advertiserId: "1", count: 2 },
+      { platform: "meta", term: "snoring", name: "Loud", advertiserId: "2", count: 10 },
+      { platform: "meta", term: "snore", name: "Loud", advertiserId: "2", count: 10 },
+    ],
+  };
+  const report = buildReport(picture);
+  assert.ok(
+    report.indexOf("Broad") < report.indexOf("Loud"),
+    "three terms at two advertisements must beat two terms at ten",
+  );
 });

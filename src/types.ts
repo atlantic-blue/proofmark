@@ -55,9 +55,16 @@ export interface Advertiser {
   readonly activeAdCountAtLeast: number;
 }
 
+export type AdFormat = "video" | "image" | "text or unknown";
+
 export interface Ad {
   readonly platform: Platform;
   readonly libraryId: string;
+  /** The library's permanent page for this advertisement. Always constructible. */
+  readonly libraryUrl: string;
+  readonly format: AdFormat;
+  /** Creative files served with the card. Expire, so they are a snapshot not an archive. */
+  readonly mediaUrls: readonly string[];
   readonly advertiserId: string | null;
   readonly advertiser: string | null;
   readonly startedRunning: string | null;
@@ -117,6 +124,12 @@ export interface ProvenHook {
   readonly platform: Platform;
   readonly advertiser: string;
   readonly copy: string;
+  readonly formats: readonly string[];
+  /** One advertisement from the group, so a reader can go and look at it. */
+  readonly exampleUrl: string;
+  readonly exampleMedia: readonly string[];
+  /** Every run length in the group, so the report can show the spread. */
+  readonly runLengths: readonly number[];
   readonly creatives: number;
   readonly runs: number;
   readonly longestRunDays: number | null;

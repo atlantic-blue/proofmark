@@ -21,6 +21,7 @@ const USER_AGENT =
 export interface RenderResult {
   readonly url: string;
   readonly text: string;
+  readonly html: string;
   readonly captures: readonly { url: string; body: string }[];
 }
 
@@ -77,7 +78,8 @@ export async function render(url: string, options: RenderOptions = {}): Promise<
     }
 
     const text = await page.evaluate(() => document.body.innerText);
-    return { url, text, captures };
+    const html = await page.content();
+    return { url, text, html, captures };
   } finally {
     await Promise.race([browser.close(), sleep(10_000)]);
   }

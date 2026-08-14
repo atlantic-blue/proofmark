@@ -9,6 +9,14 @@
 
 import type { DistributionPicture } from "./types.ts";
 
+/**
+ * A report that says "1 advertisements" reads as broken, and a reader who
+ * decides the document is broken stops believing the findings in it.
+ */
+export function plural(count: number, many: string, one: string): string {
+  return `${count} ${count === 1 ? one : many}`;
+}
+
 function line(parts: readonly string[]): string {
   return parts.join("\n");
 }
@@ -37,17 +45,18 @@ function priceModel(picture: DistributionPicture): string {
       ? []
       : [
           "",
-          `Apple publishes no rating count for ${withheld} of these ${rivals.length} rivals, so size`,
-          "is not measured for them. That is a withheld number, not a low one: CleanMyMac reports no",
-          "rating count and serves 500 reviews. The review counts further down are the closest",
-          "measure available.",
+          `Apple publishes no rating count for ${plural(withheld, "of these rivals", "of these rivals")},`,
+          "so size is not measured for them. That is a withheld number and not a low one, because the",
+          "same applications still serve hundreds of reviews. The review counts further down are the",
+          "closest measure available.",
         ];
 
   const verdict =
     paid === 0
       ? "Every rival found is free to install. A paid product in this category is asking its " +
         "advertising to convert a payment where every rival only has to convert a tap."
-      : `${free} of ${rivals.length} rivals are free to install and ${paid} charge up front.`;
+      : `${free} of ${rivals.length} rivals are free to install. ` +
+        `${plural(paid, "charges", "charge")} up front.`;
 
   return line([
     "## How the category sells",
@@ -74,8 +83,9 @@ function whereTheyBuy(picture: DistributionPicture): string {
 
   const advertiserRows = picture.advertisers.map(
     (advertiser) =>
-      `- ${advertiser.name} on ${advertiser.platform}: at least ${advertiser.activeAdCountAtLeast} ` +
-      `active advertisements, match ${advertiser.matchConfidence}.`,
+      `- ${advertiser.name} on ${advertiser.platform}: at least ` +
+      `${plural(advertiser.activeAdCountAtLeast, "active advertisements", "active advertisement")}, ` +
+      `match ${advertiser.matchConfidence}.`,
   );
 
   return line([
@@ -105,11 +115,14 @@ function whatTheySay(picture: DistributionPicture): string {
   const rows = picture.hooks.slice(0, 12).map((hook) => {
     const window =
       hook.firstSeen && hook.lastSeen ? `${hook.firstSeen} to ${hook.lastSeen}` : "dates not given";
-    const runLength = hook.longestRunDays === null ? "unknown" : `${hook.longestRunDays} days`;
+    const runLength = hook.longestRunDays === null ? "unknown" : plural(hook.longestRunDays, "days", "day");
+    const copy = hook.copy.length > 0 ? `"${hook.copy}"` : "no caption, the creative carries the message";
+    const media = hook.exampleMedia[0];
     return line([
-      `- **${hook.creatives} creatives**, ${hook.runs} runs, longest run ${runLength}, ${window}` +
-        `${hook.stillRunning ? ", still running" : ", all ended"}`,
-      `  ${hook.advertiser}: "${hook.copy}"`,
+      `- **${plural(hook.creatives, "creatives", "creative")}**, ${plural(hook.runs, "runs", "run")}, ` +
+        `longest run ${runLength}, ${window}${hook.stillRunning ? ", still running" : ", all ended"}`,
+      `  ${hook.advertiser} (${hook.formats.join(" and ")}): ${copy}`,
+      `  See it: ${hook.exampleUrl}${media ? `\n  Creative: ${media}` : ""}`,
     ]);
   });
 
@@ -120,7 +133,71 @@ function whatTheySay(picture: DistributionPicture): string {
     "In a seasonal category nobody runs a long advertisement, so length of run ranks nothing. What",
     "a company repeats is the sentence.",
     "",
+    "Every advertisement links to its permanent page in the library. The creative links come from a",
+    "content host and expire, so they are a snapshot taken on the day rather than an archive.",
+    "",
     ...rows,
+  ]);
+}
+
+function throughput(picture: DistributionPicture): string {
+  const ads = picture.ads;
+  if (ads.length === 0) {
+    return line(["## How much they run, and for how long", "", "No advertisements were captured."]);
+  }
+
+  const lengths = ads
+    .map((ad) => ad.daysLive)
+    .filter((days): days is number => days !== null)
+    .sort((left, right) => left - right);
+  const middle = lengths.length > 0 ? (lengths[Math.floor(lengths.length / 2)] as number) : 0;
+  const live = ads.filter((ad) => ad.active).length;
+  const totalCreatives = ads.reduce((sum, ad) => sum + ad.creativeShareCount, 0);
+  const advertisementDays = lengths.reduce((sum, days) => sum + days, 0);
+
+  const formats = new Map<string, number>();
+  for (const ad of ads) formats.set(ad.format, (formats.get(ad.format) ?? 0) + 1);
+
+  const perAdvertiser = new Map<string, { runs: number; creatives: number; days: number; longest: number }>();
+  for (const ad of ads) {
+    const name = ad.advertiser ?? "unknown";
+    const entry = perAdvertiser.get(name) ?? { runs: 0, creatives: 0, days: 0, longest: 0 };
+    entry.runs += 1;
+    entry.creatives += ad.creativeShareCount;
+    entry.days += ad.daysLive ?? 0;
+    entry.longest = Math.max(entry.longest, ad.daysLive ?? 0);
+    perAdvertiser.set(name, entry);
+  }
+
+  const advertiserRows = [...perAdvertiser.entries()]
+    .sort((left, right) => right[1].creatives - left[1].creatives)
+    .map(
+      ([name, entry]) =>
+        `- ${name}: ${plural(entry.runs, "runs", "run")}, ${plural(entry.creatives, "creatives", "creative")}, ` +
+        `${plural(entry.days, "advertisement days", "advertisement day")} in total, longest ` +
+        `${plural(entry.longest, "days", "day")}`,
+    );
+
+  return line([
+    "## How much they run, and for how long",
+    "",
+    `${plural(ads.length, "advertisements captured", "advertisement captured")}, carrying ` +
+      `${plural(totalCreatives, "creatives", "creative")}. ${plural(live, "are", "is")} still running today.`,
+    "",
+    lengths.length > 0
+      ? `Run length: shortest ${plural(lengths[0] as number, "days", "day")}, middle of the set ` +
+        `${plural(middle, "days", "day")}, longest ` +
+        `${plural(lengths[lengths.length - 1] as number, "days", "day")}. ` +
+        `${plural(advertisementDays, "advertisement days", "advertisement day")} across the set.`
+      : "No run length was published for any of them.",
+    "",
+    `Format: ${[...formats.entries()].map(([name, count]) => `${count} ${name}`).join(", ")}.`,
+    "",
+    ...advertiserRows,
+    "",
+    "Placement inside Meta, meaning Facebook against Instagram against Messenger, is shown in the",
+    "library only as an icon with no readable label, so it is not captured yet. Reading it needs",
+    "the detail page of each advertisement, which is one more page load each.",
   ]);
 }
 
@@ -129,27 +206,70 @@ function whoElseBids(picture: DistributionPicture): string {
     return line(["## Who else bids on these words", "", "No advertiser census was captured."]);
   }
 
-  const byTerm = new Map<string, typeof picture.categoryAdvertisers>();
+  /**
+   * Raw count buries the finding. A story farm whose copy happens to contain
+   * "snore" shows ten advertisements, exactly like a real rival does, and the
+   * list then reads as noise.
+   *
+   * An advertiser that appears under SEVERAL of the product's terms is far more
+   * likely to be in the category, by the same reasoning that decides which
+   * search results count as rivals. So they lead, and the rest follow.
+   */
+  const byAdvertiser = new Map<string, { name: string; terms: Set<string>; total: number }>();
   for (const entry of picture.categoryAdvertisers) {
-    const list = byTerm.get(entry.term) ?? [];
-    byTerm.set(entry.term, [...list, entry]);
+    const seen = byAdvertiser.get(entry.advertiserId) ?? {
+      name: entry.name,
+      terms: new Set<string>(),
+      total: 0,
+    };
+    seen.terms.add(entry.term);
+    seen.total = Math.max(seen.total, entry.count);
+    byAdvertiser.set(entry.advertiserId, seen);
   }
 
-  const blocks: string[] = [];
-  for (const [term, entries] of byTerm) {
-    const top = [...entries].sort((left, right) => right.count - left.count).slice(0, 10);
-    blocks.push(`**"${term}"**: ${entries.length} advertisers. Largest:`);
-    blocks.push(...top.map((entry) => `  - ${entry.count} advertisements, ${entry.name}`));
-    blocks.push("");
-  }
+  const matched = new Set(picture.advertisers.map((advertiser) => advertiser.advertiserId));
+  const ranked = [...byAdvertiser.entries()]
+    .map(([advertiserId, seen]) => ({
+      advertiserId,
+      name: seen.name,
+      terms: [...seen.terms].sort(),
+      total: seen.total,
+      isRival: matched.has(advertiserId),
+    }))
+    .sort((left, right) => {
+      if (right.terms.length !== left.terms.length) return right.terms.length - left.terms.length;
+      return right.total - left.total;
+    });
+
+  const across = ranked.filter((entry) => entry.terms.length > 1);
+  const single = ranked.filter((entry) => entry.terms.length === 1);
+
+  const acrossRows = across
+    .slice(0, 15)
+    .map(
+      (entry) =>
+        `- ${entry.name}${entry.isRival ? " (a rival we track)" : ""}: ` +
+        `${plural(entry.terms.length, "terms", "term")}, up to ` +
+        `${plural(entry.total, "advertisements", "advertisement")}. ${entry.terms.join(", ")}`,
+    );
 
   return line([
     "## Who else bids on these words",
     "",
-    "Every advertiser the library reports against the product's own search terms. The count",
-    "saturates at ten, so ten means ten or more. An absent rival is a finding too.",
+    `${byAdvertiser.size} advertisers in total across ${new Set(picture.categoryAdvertisers.map((entry) => entry.term)).size} search terms.`,
+    "The count saturates at ten, so ten means ten or more. An absent rival is a finding too.",
     "",
-    ...blocks,
+    "**Advertisers that appear under more than one of the terms.** These are the ones most likely",
+    "to be in the category rather than to have used the word in passing.",
+    "",
+    ...(acrossRows.length > 0
+      ? acrossRows
+      : ["- None. No advertiser appeared under more than one term, which is itself worth knowing."]),
+    "",
+    `**The remaining ${plural(single.length, "advertisers appeared under one term each", "advertiser appeared under one term")}.**`,
+    "In consumer categories this tail is usually unrelated: story and drama accounts whose copy",
+    "happens to contain the word. Read the full list in picture.json rather than here.",
+    "",
   ]);
 }
 
@@ -220,6 +340,8 @@ export function buildReport(picture: DistributionPicture): string {
     whereTheyBuy(picture),
     "",
     whatTheySay(picture),
+    "",
+    throughput(picture),
     "",
     whoElseBids(picture),
     "",

@@ -144,7 +144,7 @@ async function main(): Promise<void> {
     const result = await render(advertiserPageUrl(advertiser.advertiserId, product.market), {
       scrolls: 8,
     });
-    const parsed = parseAds(result.text).map((ad) => ({ ...ad, advertiserId: advertiser.advertiserId }));
+    const parsed = parseAds(result.text, new Date(), result.html).map((ad) => ({ ...ad, advertiserId: advertiser.advertiserId }));
     ads.push(...parsed);
     log(`   ${advertiser.name}: ${parsed.length} advertisements`);
   }
