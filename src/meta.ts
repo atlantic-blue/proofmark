@@ -75,13 +75,34 @@ export function advertiserPageUrl(advertiserId: string, market: string): string 
   );
 }
 
+/**
+ * The library writes a date in the reader's own order, and that order follows
+ * where the request comes from rather than the market being searched. A laptop
+ * in London reads "30 Dec 2025". A runner in a United States region reads
+ * "Dec 30, 2025" for the same advertisement.
+ *
+ * Reading only one of them loses every date without any error: the page then
+ * shows the right number of advertisements, an empty chart, and "dates not
+ * given" against every hook.
+ */
 export function parseLibraryDate(value: string): Date | null {
-  const match = value.match(/(\d{1,2}) (\w{3})\w* (\d{4})/);
-  if (!match?.[1] || !match[2] || !match[3]) return null;
-  const month = MONTHS[match[2]];
-  if (month === undefined) return null;
-  return new Date(Date.UTC(Number(match[3]), month, Number(match[1])));
+  const dayFirst = value.match(/\b(\d{1,2}) (\w{3})\w* (\d{4})\b/);
+  if (dayFirst?.[1] && dayFirst[2] && dayFirst[3]) {
+    const month = MONTHS[dayFirst[2]];
+    if (month !== undefined) return new Date(Date.UTC(Number(dayFirst[3]), month, Number(dayFirst[1])));
+  }
+
+  const monthFirst = value.match(/\b(\w{3})\w* (\d{1,2}),? (\d{4})\b/);
+  if (monthFirst?.[1] && monthFirst[2] && monthFirst[3]) {
+    const month = MONTHS[monthFirst[1]];
+    if (month !== undefined) return new Date(Date.UTC(Number(monthFirst[3]), month, Number(monthFirst[2])));
+  }
+
+  return null;
 }
+
+/** Either order, so a range parses wherever the runner happens to sit. */
+const LIBRARY_DATE = "(?:\\d{1,2} \\w{3,9} \\d{4}|\\w{3,9} \\d{1,2},? \\d{4})";
 
 /** Inclusive, so a run that starts and ends on one day counts as one day. */
 export function daysBetween(from: Date, to: Date): number {
@@ -170,7 +191,7 @@ export function parseAds(pageText: string, readAt: Date = new Date(), html = "")
     const libraryId = (lines[0] ?? "").trim();
     if (!/^\d+$/.test(libraryId)) continue;
 
-    const rangeMatch = chunk.match(/(\d{1,2} \w{3,9} \d{4})\s*-\s*(\d{1,2} \w{3,9} \d{4})/);
+    const rangeMatch = chunk.match(new RegExp(`(${LIBRARY_DATE})\\s*[-\\u2013]\\s*(${LIBRARY_DATE})`));
     const startedMatch = chunk.match(/Started running on ([^\n·]+)/);
     const shareMatch = chunk.match(/(\d+) ads use this creative and text/);
 

@@ -306,3 +306,34 @@ Sponsored
   const nameless = hooks.find((hook) => hook.copy.length === 0);
   assert.equal(nameless?.creatives, 500, "the silent group is still reported, just not first");
 });
+
+
+/** The same two SnoreLab cards as read from a runner in a United States region. */
+const ADVERTISER_VIEW_US = `~150 results
+Inactive
+Library ID: 1893577217926189
+Dec 30, 2025 - Jan 8, 2026
+Platforms
+7 ads use this creative and text
+See summary details
+SnoreLab
+Sponsored
+Have you been told you snore? SnoreLab records and measures your snoring.
+`;
+
+test("a date parses in either order, because the library writes it for the reader", () => {
+  assert.equal(parseLibraryDate("30 Dec 2025")?.toISOString().slice(0, 10), "2025-12-30");
+  assert.equal(parseLibraryDate("Dec 30, 2025")?.toISOString().slice(0, 10), "2025-12-30");
+  assert.equal(parseLibraryDate("Jan 8, 2026")?.toISOString().slice(0, 10), "2026-01-08");
+  assert.equal(parseLibraryDate("September 1, 2026")?.toISOString().slice(0, 10), "2026-09-01");
+  assert.equal(parseLibraryDate("2026-08-14"), null);
+});
+
+test("a run reads the same length whichever order the dates came in", () => {
+  const british = parseAds(ADVERTISER_VIEW, READ_AT)[0];
+  const american = parseAds(ADVERTISER_VIEW_US, READ_AT)[0];
+  assert.equal(british?.daysLive, 10);
+  assert.equal(american?.daysLive, 10, "a runner in another region must not lose every date");
+  assert.equal(american?.ended, "Jan 8, 2026");
+  assert.equal(american?.creativeShareCount, 7);
+});
