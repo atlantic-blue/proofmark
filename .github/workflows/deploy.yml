@@ -126,7 +126,10 @@ jobs:
             echo "The published page answered $code."
             exit 1
           fi
-          for marker in "What the competition does for distribution" "advertisements read" "flight-bar" "Open in the ad library"; do
+          # The index page also carries the headline, so a folder address that
+          # silently falls back to it would pass a headline check. The markers
+          # below are only on a report page, which is what catches that.
+          for marker in "What the competition does for distribution" "advertisements read" "flight-bar" "Open in the ad library" "Rival Watch"; do
             if ! grep -q "$marker" page.html; then
               echo "The page is missing: $marker"
               exit 1
