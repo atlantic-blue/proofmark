@@ -8,3 +8,13 @@ out/
 # runnable straight after a clone.
 products/*.json
 !products/hush-log.json
+
+# Terraform state. The bootstrap keeps its state locally, because it creates the
+# role that everything else assumes and so cannot use the remote backend. A copy
+# lives in the hub at orgs/atlantic-blue/.secrets/proofmark-bootstrap.tfstate.
+# Losing it orphans the role and the state bucket; import them back before
+# applying again.
+.terraform/
+*.tfstate
+*.tfstate.*
+.terraform.lock.hcl

@@ -13,7 +13,7 @@
  * than the time it saves.
  */
 
-import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { mkdir, readdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { collectReviews, discoverRivals } from "./apple.ts";
 import { render } from "./browser.ts";
@@ -29,6 +29,7 @@ import {
 } from "./meta.ts";
 import { readPresence } from "./platforms.ts";
 import { buildReport } from "./report.ts";
+import { buildIndex, buildSite } from "./site.ts";
 import { summariseVoice } from "./voice.ts";
 import type { Ad, Advertiser, DistributionPicture, PlatformPresence, Product, VoiceOfCustomer } from "./types.ts";
 
@@ -54,6 +55,35 @@ export function validateProduct(value: unknown): Product {
   return product as Product;
 }
 
+/**
+ * Rebuilds the landing page from every report already on disk, so publishing one
+ * product never drops the others off the front page.
+ */
+async function writeSiteIndex(): Promise<void> {
+  const entries = await readdir("out", { withFileTypes: true }).catch(() => []);
+  const products: { productId: string; name: string; readAt: string; ads: number }[] = [];
+
+  for (const entry of entries) {
+    if (!entry.isDirectory()) continue;
+    try {
+      const saved = JSON.parse(
+        await readFile(join("out", entry.name, "picture.json"), "utf8"),
+      ) as DistributionPicture;
+      products.push({
+        productId: entry.name,
+        name: saved.product.name,
+        readAt: saved.readAt,
+        ads: saved.ads.length,
+      });
+    } catch {
+      // A folder with no picture is not a report, so it is not listed.
+    }
+  }
+
+  products.sort((left, right) => left.name.localeCompare(right.name));
+  await writeFile(join("out", "index.html"), buildIndex(products), "utf8");
+}
+
 async function main(): Promise<void> {
   const productPath = process.argv[2];
   if (!productPath) {
@@ -76,7 +106,9 @@ async function main(): Promise<void> {
       await readFile(join(outputDir, "picture.json"), "utf8"),
     ) as DistributionPicture;
     await writeFile(join(outputDir, "REPORT.md"), buildReport(saved), "utf8");
-    log(`rewrote ${outputDir}/REPORT.md from the picture read on ${saved.readAt.slice(0, 10)}`);
+    await writeFile(join(outputDir, "index.html"), buildSite(saved), "utf8");
+    await writeSiteIndex();
+    log(`rewrote ${outputDir} from the picture read on ${saved.readAt.slice(0, 10)}`);
     return;
   }
 
@@ -195,8 +227,10 @@ async function main(): Promise<void> {
 
   await writeFile(join(outputDir, "picture.json"), JSON.stringify(picture, null, 1), "utf8");
   await writeFile(join(outputDir, "REPORT.md"), buildReport(picture), "utf8");
+  await writeFile(join(outputDir, "index.html"), buildSite(picture), "utf8");
+  await writeSiteIndex();
 
-  log(`\nwrote ${outputDir}/REPORT.md and picture.json`);
+  log(`\nwrote ${outputDir}: REPORT.md, index.html and picture.json`);
 }
 
 /**

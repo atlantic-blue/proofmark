@@ -1,0 +1,147 @@
+name: Deploy
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+  schedule:
+    # Once a week. A category does not turn over daily, and every run drives a
+    # real browser at somebody else's service.
+    - cron: "17 6 * * 1"
+
+permissions:
+  id-token: write
+  contents: read
+
+concurrency:
+  group: proofmark-deploy
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    name: Read the rivals, build the report, publish it
+    runs-on: ubuntu-latest
+    # No GitHub environment on purpose. Naming one changes the subject in the
+    # token from "repo:owner/name:ref:refs/heads/main" to
+    # "repo:owner/name:environment:production", which the deploy role's trust
+    # policy does not expect.
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+
+      - name: Prove the tests pass before anything is published
+        run: |
+          npx tsc --noEmit
+          node --experimental-strip-types --test src/*.test.ts
+
+      - uses: browser-actions/setup-chrome@v1
+        id: chrome
+        with:
+          chrome-version: stable
+
+      - name: Read every product's rivals
+        env:
+          CHROME_PATH: ${{ steps.chrome.outputs.chrome-path }}
+        run: |
+          shopt -s nullglob
+          files=(products/*.json)
+          if [ ${#files[@]} -eq 0 ]; then
+            echo "No product file, so there is nothing to report on."
+            exit 1
+          fi
+          for product in "${files[@]}"; do
+            echo "::group::$product"
+            node --experimental-strip-types src/run.ts "$product"
+            echo "::endgroup::"
+          done
+
+      - name: Refuse to publish a report with nothing in it
+        # A run that reads no advertisement is indistinguishable from a healthy
+        # run until somebody opens the page, and by then the empty page is live.
+        # The most likely cause is the host refusing a runner address, which
+        # produces no error of its own.
+        run: |
+          total=0
+          for picture in out/*/picture.json; do
+            ads=$(node -e "process.stdout.write(String(JSON.parse(require('fs').readFileSync('$picture','utf8')).ads.length))")
+            rivals=$(node -e "process.stdout.write(String(JSON.parse(require('fs').readFileSync('$picture','utf8')).rivals.length))")
+            echo "$picture: $rivals rivals, $ads advertisements"
+            if [ "$rivals" -eq 0 ]; then
+              echo "No rival was found for $picture. Nothing below this point would be true."
+              exit 1
+            fi
+            total=$((total + ads))
+          done
+          if [ "$total" -eq 0 ]; then
+            echo "Not one advertisement was read across every product."
+            echo "The library most likely refused this runner. Not publishing."
+            exit 1
+          fi
+          echo "$total advertisements across every product"
+
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: arn:aws:iam::230345688874:role/proofmark-deploy
+          aws-region: eu-west-1
+
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_wrapper: false
+
+      - name: Apply the infrastructure
+        run: |
+          terraform -chdir=infra init -input=false
+          terraform -chdir=infra apply -input=false -auto-approve
+
+      - name: Publish the pages
+        # Only the pages go up. picture.json holds every record behind the
+        # report and stays on the runner, because the distribution is public.
+        run: |
+          bucket=$(terraform -chdir=infra output -raw site_bucket)
+          find out -name "*.json" -delete
+          find out -name "REPORT.md" -delete
+          aws s3 sync out "s3://${bucket}" --delete --content-type "text/html; charset=utf-8"
+          distribution=$(terraform -chdir=infra output -raw distribution_id)
+          aws cloudfront create-invalidation --distribution-id "$distribution" --paths "/*" > /dev/null
+
+      - name: Open the thing that was deployed
+        # Green means the steps ran. It says nothing about whether the page
+        # works, so the published address is fetched and read.
+        run: |
+          url=$(terraform -chdir=infra output -raw site_url)
+          for attempt in 1 2 3 4 5 6 7 8; do
+            code=$(curl -s -o page.html -w "%{http_code}" "$url/hush-log/" || true)
+            if [ "$code" = "200" ] && grep -q "What the competition does for distribution" page.html; then
+              break
+            fi
+            echo "attempt $attempt: http $code, waiting for the edge"
+            sleep 20
+          done
+          if [ "$code" != "200" ]; then
+            echo "The published page answered $code."
+            exit 1
+          fi
+          for marker in "What the competition does for distribution" "advertisements read" "flight-bar" "Open in the ad library"; do
+            if ! grep -q "$marker" page.html; then
+              echo "The page is missing: $marker"
+              exit 1
+            fi
+          done
+          bars=$(grep -o "flight-bar" page.html | wc -l)
+          echo "served $(wc -c < page.html) bytes with $bars advertisement bars"
+          if [ "$bars" -lt 2 ]; then
+            echo "The chart has no bars, so the page is empty of the thing it exists to show."
+            exit 1
+          fi
+          {
+            echo "### Proofmark published"
+            echo ""
+            echo "- Index: $url/"
+            echo "- Hush Log: $url/hush-log/"
+            echo "- $bars advertisement bars on the chart"
+          } >> "$GITHUB_STEP_SUMMARY"

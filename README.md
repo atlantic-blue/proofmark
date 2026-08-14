@@ -144,6 +144,27 @@ and none of them produced an error.
 - The angle and brief stages, which turn the picture into something to make.
 - Results coming back, which is what closes the loop.
 
+## The published report
+
+The pipeline writes `out/<productId>/index.html` as well as the markdown. It is one self
+contained page: no script, no network, no build step, so it opens from a file, from a bucket, or
+anywhere that renders markup.
+
+The centre of it is a flight chart. Every advertisement captured is a bar on one shared date
+axis, coloured by advertiser and outlined if it is still live, so "how long do these run" is
+answered by looking rather than by reading a column of numbers.
+
+**It deploys through the pipeline on merge to `main`**, never from a laptop. The job reads the
+rivals with a real browser on the runner, builds the pages, applies the infrastructure, syncs
+the pages to a private bucket, invalidates the edge, then fetches the published address and
+checks the page actually carries advertisements. A run that reads nothing refuses to publish,
+because an empty report and a healthy one look identical until somebody opens the page.
+
+`picture.json` never leaves the runner. Only the pages go up.
+
+`infra/bootstrap` is the one exception to deploying through the pipeline, and it says why in its
+own comment: it creates the role the job assumes, so the job cannot create it.
+
 ## Tests
 
 ```
