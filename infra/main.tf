@@ -59,6 +59,14 @@ resource "aws_cloudfront_origin_access_control" "site" {
   signing_protocol                  = "sigv4"
 }
 
+resource "aws_cloudfront_function" "rewrite" {
+  name    = "${var.name}-index-rewrite"
+  runtime = "cloudfront-js-2.0"
+  comment = "adds index.html to a folder address"
+  publish = true
+  code    = file("${path.module}/functions/rewrite.js")
+}
+
 resource "aws_cloudfront_distribution" "site" {
   enabled             = true
   default_root_object = "index.html"
@@ -90,11 +98,16 @@ resource "aws_cloudfront_distribution" "site" {
         forward = "none"
       }
     }
+
+    function_association {
+      event_type   = "viewer-request"
+      function_arn = aws_cloudfront_function.rewrite.arn
+    }
   }
 
-  # A folder address such as /hush-log/ must serve that folder's page. The
-  # distribution does not add index.html to a subfolder by itself, so a missing
-  # key is answered with the report index rather than with an error page.
+  # The rewrite function above handles folder addresses. These two remain for a
+  # key that genuinely is not there, so a mistyped address lands on the report
+  # index rather than on an XML error from the bucket.
   custom_error_response {
     error_code         = 403
     response_code      = 200
