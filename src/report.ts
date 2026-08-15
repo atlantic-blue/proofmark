@@ -8,7 +8,7 @@
  * their customers are angry about. Gaps last and never hidden.
  */
 
-import { byCustomerBase, summariseSweep } from "./markets.ts";
+import { byAdvertiser, byCustomerBase, summariseSweep } from "./markets.ts";
 import type { DistributionPicture } from "./types.ts";
 
 /**
@@ -87,33 +87,47 @@ function whereTheirMarketIs(picture: DistributionPicture): string {
     ]);
   }
 
-  const summary = summariseSweep(sweep);
   const home = picture.product.market.toUpperCase();
-  const homeReading = sweep.find((entry) => entry.market === home);
-  const rows = byCustomerBase(sweep)
-    .slice(0, 15)
-    .map((entry) => {
-      const ratings = entry.ratings === null ? "no store listing" : `${entry.ratings.toLocaleString("en-GB")} ratings`;
-      const ads = entry.liveAds === null ? "count unread" : entry.liveAds === 0 ? "nothing live" : `${entry.liveAds} live`;
-      return `- ${entry.market}: ${ratings}, ${ads}`;
-    });
+  const grouped = byAdvertiser(sweep);
+  const nameOf = (advertiserId: string) =>
+    picture.advertisers.find((entry) => entry.advertiserId === advertiserId)?.name ?? advertiserId;
 
-  const homeLine =
-    homeReading && homeReading.liveAds !== null
-      ? `${home}, the market read in depth below, carries ${plural(homeReading.liveAds, "live advertisements", "live advertisement")}.`
-      : `${home} is the market read in depth below.`;
+  const perRival = [...grouped.entries()].flatMap(([advertiserId, readings]) => {
+    const summary = summariseSweep(readings);
+    const homeReading = readings.find((entry) => entry.market === home);
+    const live =
+      summary.marketsWithAds === 0
+        ? "runs nothing anywhere today"
+        : `live in ${summary.marketsWithAds} of ${summary.marketsRead} markets, ` +
+          `busiest ${summary.busiest?.market} at ${summary.busiest?.liveAds}`;
+    const base = summary.largestBase
+      ? `largest base ${summary.largestBase.market} at ` +
+        `${(summary.largestBase.ratings ?? 0).toLocaleString("en-GB")} ratings`
+      : "no store listing found";
+    const here =
+      homeReading && homeReading.liveAds !== null
+        ? `${plural(homeReading.liveAds, "live advertisements", "live advertisement")} in ${home}`
+        : `${home} unread`;
+    const rows = byCustomerBase(readings)
+      .slice(0, 10)
+      .map((entry) => {
+        const ratings =
+          entry.ratings === null ? "no store listing" : `${entry.ratings.toLocaleString("en-GB")} ratings`;
+        const ads =
+          entry.liveAds === null ? "count unread" : entry.liveAds === 0 ? "nothing live" : `${entry.liveAds} live`;
+        return `  - ${entry.market}: ${ratings}, ${ads}`;
+      });
+    return [`- **${nameOf(advertiserId)}**: ${live}. ${base}. ${here}.`, ...rows];
+  });
 
   return line([
     "## Where their market is",
     "",
-    `${summary.busiest?.market ?? "No market"} is where they buy hardest, at ${summary.busiest?.liveAds ?? 0} live.`,
-    `${summary.largestBase?.market ?? "No market"} holds the most customers, at ` +
-      `${(summary.largestBase?.ratings ?? 0).toLocaleString("en-GB")} ratings.`,
-    homeLine,
+    `${grouped.size === 1 ? "One rival" : `${grouped.size} rivals`} counted market by market.`,
+    "Advertisements say where they are buying today. Ratings say where their customers already",
+    "are. Watching one country is how the wrong one gets watched.",
     "",
-    `Live advertising in ${summary.marketsWithAds} of ${summary.marketsRead} markets read.`,
-    "",
-    ...rows,
+    ...perRival,
     "",
     "Neither number is money. An advertisement count counts objects, not budget, and a rating",
     "count is a lifetime total that only rises. The library publishes no spend and no impressions",

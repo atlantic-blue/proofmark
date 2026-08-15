@@ -96,6 +96,56 @@ export function byCustomerBase(sweep: readonly MarketReading[]): MarketReading[]
   return [...sweep].sort((left, right) => (right.ratings ?? -1) - (left.ratings ?? -1));
 }
 
+/**
+ * Splits a sweep back into one list per advertiser, in the order the advertisers
+ * were swept.
+ *
+ * The sweep is stored flat, one record per advertiser and market, because that
+ * is what a store wants. Everything that reads it wants it grouped.
+ */
+export function byAdvertiser(sweep: readonly MarketReading[]): Map<string, MarketReading[]> {
+  const grouped = new Map<string, MarketReading[]>();
+  for (const reading of sweep) {
+    const list = grouped.get(reading.advertiserId) ?? [];
+    list.push(reading);
+    grouped.set(reading.advertiserId, list);
+  }
+  return grouped;
+}
+
+export interface MatrixRow {
+  readonly market: string;
+  /** One cell per advertiser, in the column order given. Absent reads are null. */
+  readonly cells: readonly (MarketReading | null)[];
+}
+
+/**
+ * One row per market, one column per advertiser, so two rivals can be compared
+ * on the same line rather than in two lists nobody holds side by side.
+ *
+ * Rows are ordered by the largest customer base any advertiser has in that
+ * market, so the markets that matter to somebody come first. Ordering by one
+ * chosen rival would bury a market that only the other one sells in.
+ */
+export function marketMatrix(
+  sweep: readonly MarketReading[],
+  advertiserIds: readonly string[],
+): MatrixRow[] {
+  const markets = [...new Set(sweep.map((reading) => reading.market))];
+  const index = new Map(sweep.map((reading) => [`${reading.advertiserId}::${reading.market}`, reading]));
+
+  return markets
+    .map((market) => ({
+      market,
+      cells: advertiserIds.map((advertiserId) => index.get(`${advertiserId}::${market}`) ?? null),
+    }))
+    .sort((left, right) => topRatings(right.cells) - topRatings(left.cells));
+}
+
+function topRatings(cells: readonly (MarketReading | null)[]): number {
+  return Math.max(-1, ...cells.map((cell) => cell?.ratings ?? -1));
+}
+
 /** Sorted by the counter reading, and markets with no advertisements are left out. */
 export function byPressure(sweep: readonly MarketReading[]): MarketReading[] {
   return sweep

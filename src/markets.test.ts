@@ -1,8 +1,10 @@
 import { deepStrictEqual, ok, strictEqual } from "node:assert/strict";
 import { test } from "node:test";
 import {
+  byAdvertiser,
   byCustomerBase,
   byPressure,
+  marketMatrix,
   pressurePer10k,
   readMarketSweep,
   summariseSweep,
@@ -178,4 +180,51 @@ test("the default sweep is wide and holds no duplicates", () => {
   ok(WORLD_MARKETS.length >= 30, `only ${WORLD_MARKETS.length} markets`);
   strictEqual(new Set(WORLD_MARKETS).size, WORLD_MARKETS.length);
   ok(WORLD_MARKETS.every((market) => /^[A-Z]{2}$/.test(market)));
+});
+
+test("a flat sweep splits back into one list per advertiser, in sweep order", () => {
+  const grouped = byAdvertiser([
+    reading({ market: "US", advertiserId: "a", liveAds: 0 }),
+    reading({ market: "US", advertiserId: "b", liveAds: 70 }),
+    reading({ market: "GB", advertiserId: "a", liveAds: 0 }),
+  ]);
+  deepStrictEqual([...grouped.keys()], ["a", "b"]);
+  strictEqual(grouped.get("a")?.length, 2);
+  strictEqual(grouped.get("b")?.length, 1);
+});
+
+test("the matrix puts two rivals on one row per market", () => {
+  const rows = marketMatrix(
+    [
+      reading({ market: "US", advertiserId: "a", liveAds: 0, ratings: 57114 }),
+      reading({ market: "US", advertiserId: "b", liveAds: 70, ratings: 349104 }),
+      reading({ market: "GB", advertiserId: "a", liveAds: 0, ratings: 14064 }),
+      reading({ market: "GB", advertiserId: "b", liveAds: 12, ratings: 33470 }),
+    ],
+    ["a", "b"],
+  );
+  deepStrictEqual(rows.map((row) => row.market), ["US", "GB"]);
+  strictEqual(rows[0]?.cells[0]?.liveAds, 0);
+  strictEqual(rows[0]?.cells[1]?.liveAds, 70);
+});
+
+test("a market only one rival sells in still gets a row, with a hole for the other", () => {
+  const rows = marketMatrix(
+    [
+      reading({ market: "US", advertiserId: "a", ratings: 10 }),
+      reading({ market: "JP", advertiserId: "b", ratings: 65902 }),
+    ],
+    ["a", "b"],
+  );
+  // Ordered by the largest base any rival has there, so a market that matters to
+  // one rival is never buried because the other rival ignores it.
+  deepStrictEqual(rows.map((row) => row.market), ["JP", "US"]);
+  strictEqual(rows[0]?.cells[0], null);
+  strictEqual(rows[0]?.cells[1]?.ratings, 65902);
+});
+
+test("an advertiser column with no readings at all is all holes, never an error", () => {
+  const rows = marketMatrix([reading({ market: "US", advertiserId: "a", ratings: 5 })], ["a", "missing"]);
+  strictEqual(rows[0]?.cells[1], null);
+  strictEqual(rows.length, 1);
 });
