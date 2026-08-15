@@ -20,10 +20,11 @@ For one product, read in depth in one market and counted in every market:
 
 1. **Who the rivals are.** Found by searching what a buyer would type, not by a list somebody
    wrote by hand.
-2. **Where their market is.** The closest rival counted in every market, so the report can say
-   where they buy and where their customers already are. The two are not the same places.
-   Reading one country and calling it the category is how a rival's quietest market got read as
-   the whole picture.
+2. **Where their market is.** Every matched rival counted in every market, side by side, so the
+   report can say where each one buys and where each one already has customers. The two are not
+   the same places. Reading one country and calling it the category is how a rival's quietest
+   market got read as the whole picture, and reading one rival is how a rival that advertises
+   nowhere became the whole comparison.
 3. **How the category sells.** Free to install or paid, and what they charge after. This comes
    early in the report because it decides whether any advertisement can work.
 4. **Where they buy.** Read from each rival's own site and the public tag container behind it,
@@ -44,7 +45,7 @@ flowchart TD
   D --> C["Ad library keyword search: who bids on these words"]
   C --> M["Match each rival to an advertiser account"]
   M --> A["Read that advertiser's advertisements"]
-  M --> S["Count the closest rival in every market"]
+  M --> S["Count every matched rival in every market"]
   S --> R
   A --> H["Group by hook, rank by creatives behind it"]
   D --> W["Read each rival site: which platforms they measure"]
@@ -94,8 +95,8 @@ One file in `products/`. Nothing else.
 iPhone and `macSoftware` for Mac.
 
 `market` is the country read in depth: its store, its reviews, its advertisement copy. Add
-`worldMarkets` to change the countries the closest rival is counted in. It defaults to the forty
-in `WORLD_MARKETS`.
+`worldMarkets` to change the countries each matched rival is counted in. It defaults to the
+forty in `WORLD_MARKETS`.
 
 ## What it costs
 

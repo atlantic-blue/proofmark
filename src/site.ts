@@ -11,7 +11,8 @@
 
 import type { Ad, DistributionPicture, MarketReading, ProvenHook } from "./types.ts";
 import { parseLibraryDate } from "./meta.ts";
-import { byCustomerBase, byPressure, pressurePer10k, summariseSweep } from "./markets.ts";
+import { byAdvertiser, byPressure, marketMatrix, pressurePer10k, summariseSweep } from "./markets.ts";
+import type { MatrixRow } from "./markets.ts";
 
 const MAX_HOOKS = 14;
 const MAX_RIVALS = 14;
@@ -169,105 +170,161 @@ function bar(value: number, max: number, tone: string, root: boolean): string {
 }
 
 /**
- * Five cells, always, in this order: country, ratings bar, ratings number,
- * advertisements bar, advertisements number.
+ * One measure, one column per rival, one row per market.
  *
- * The state of a market lives in its number cell rather than in place of a bar,
- * so a narrow screen can drop both bars and still leave three complete columns.
- * A row that loses cells instead of losing bars wraps, and a wrapped row puts a
- * count under the wrong country.
+ * Three cells per rival, always: a bar, then a number that carries the state.
+ * Putting "none" in the number cell rather than in place of the bar keeps the
+ * cell count fixed, so a narrow screen can drop the bars and still leave whole
+ * columns. A row that loses cells wraps, and a wrapped row puts a count under
+ * the wrong country.
  */
-function marketRow(reading: MarketReading, maxRatings: number, maxAds: number): string {
-  const ratings = reading.ratings;
-  const ads = reading.liveAds;
+function matrix(
+  rows: readonly MatrixRow[],
+  columns: readonly { advertiserId: string; name: string; tone: number }[],
+  measure: "ratings" | "liveAds",
+  heading: string,
+): string {
+  const values = rows.flatMap((row) => row.cells.map((cell) => cell?.[measure] ?? 0));
+  const max = Math.max(...values, 0);
+  const root = measure === "ratings";
+  // Declared as custom properties on the list rather than inline on each row.
+  // An inline grid template on the row would outrank the narrow screen rule and
+  // the layout would never respond.
+  const template =
+    `--cols:34px ${columns.map(() => "1fr 62px").join(" ")};` +
+    `--cols-narrow:34px ${columns.map(() => "62px").join(" ")}`;
 
-  const ratingsNumber =
-    ratings === null ? `<span class="market-none">no listing</span>` : ratings.toLocaleString("en-GB");
-  const adsNumber =
-    ads === null
-      ? `<span class="market-none">unread</span>`
-      : ads === 0
-        ? `<span class="market-none">none live</span>`
-        : String(ads);
+  const body = rows
+    .map((row) => {
+      const cells = row.cells
+        .map((cell, column) => {
+          const value = cell?.[measure] ?? null;
+          const label =
+            value === null
+              ? `<span class="market-none">unread</span>`
+              : value === 0
+                ? `<span class="market-none">none</span>`
+                : measure === "ratings"
+                  ? value.toLocaleString("en-GB")
+                  : String(value);
+          const track =
+            value === null || value === 0
+              ? `<span class="bar-track"></span>`
+              : bar(value, max, `tone-${column % 4}`, root);
+          return `${track}<span class="market-num">${label}</span>`;
+        })
+        .join("");
+      return `<li><span class="market-cc">${escapeHtml(row.market)}</span>${cells}</li>`;
+    })
+    .join("");
 
-  return `<li>
-      <span class="market-cc">${escapeHtml(reading.market)}</span>
-      ${ratings === null ? `<span class="bar-track"></span>` : bar(ratings, maxRatings, "base", true)}
-      <span class="market-num">${ratingsNumber}</span>
-      ${ads === null || ads === 0 ? `<span class="bar-track"></span>` : bar(ads, maxAds, "ads", false)}
-      <span class="market-num">${adsNumber}</span>
-    </li>`;
+  const key = columns
+    .map(
+      (column) =>
+        `<span class="key-item"><i class="swatch tone-${column.tone % 4}"></i>${escapeHtml(column.name)}</span>`,
+    )
+    .join("");
+
+  return `<h3>${escapeHtml(heading)}</h3>
+    <div class="chart-key">${key}</div>
+    <ul class="markets" style="${template}">${body}</ul>`;
 }
 
 /**
- * Where the rival's customers are, against where the rival is buying.
+ * Where each rival's customers are, against where each rival is buying.
+ *
+ * Every matched rival gets a column, because one rival on its own is not a
+ * comparison. The first version of this section showed only the closest rival,
+ * which for Hush Log is SnoreLab, and SnoreLab is dark in all forty markets. The
+ * published page therefore said nothing at all while ShutEye's thirty market
+ * campaign sat unread one row down the list.
  *
  * Both readings go on the page, including the one that argues with the other,
- * because the raw counts and the counts divided by the base put the same market
- * in opposite halves of the list and only showing the flattering one is a way of
+ * because raw counts and counts divided by the customer base put the same market
+ * in opposite halves of the list. Showing only the flattering one is a way of
  * lying with two true numbers.
  */
 function marketSection(picture: DistributionPicture): string {
   const sweep = picture.marketSweep ?? [];
   if (sweep.length === 0) return "";
 
-  const summary = summariseSweep(sweep);
-  const rows = byCustomerBase(sweep);
-  const maxRatings = Math.max(...rows.map((entry) => entry.ratings ?? 0), 0);
-  const maxAds = Math.max(...rows.map((entry) => entry.liveAds ?? 0), 0);
-  const lead = picture.advertisers[0];
+  const grouped = byAdvertiser(sweep);
+  const columns = [...grouped.keys()].map((advertiserId, index) => ({
+    advertiserId,
+    name: picture.advertisers.find((entry) => entry.advertiserId === advertiserId)?.name ?? advertiserId,
+    tone: index,
+  }));
+  const rows = marketMatrix(sweep, columns.map((column) => column.advertiserId));
   const home = picture.product.market.toUpperCase();
-  const homeReading = sweep.find((entry) => entry.market === home) ?? null;
 
-  const pressure = byPressure(sweep);
-  const maxPressure = pressurePer10k(pressure[0] ?? sweep[0] as MarketReading) ?? 0;
-  const homePressure = homeReading ? pressurePer10k(homeReading) : null;
-  const homeRank = homeReading ? pressure.findIndex((entry) => entry.market === home) + 1 : 0;
+  const perRival = columns.map((column) => {
+    const readings = grouped.get(column.advertiserId) ?? [];
+    const summary = summariseSweep(readings);
+    const homeReading = readings.find((entry) => entry.market === home) ?? null;
+    return { column, readings, summary, homeReading };
+  });
+
+  const standings = perRival
+    .map(({ column, summary, homeReading }) => {
+      const live =
+        summary.marketsWithAds === 0
+          ? "runs nothing anywhere today"
+          : `live in ${summary.marketsWithAds} of ${summary.marketsRead} markets, busiest ${escapeHtml(summary.busiest?.market ?? "")} at ${summary.busiest?.liveAds ?? 0}`;
+      const base = summary.largestBase
+        ? `largest base ${escapeHtml(summary.largestBase.market)} at ${(summary.largestBase.ratings ?? 0).toLocaleString("en-GB")}`
+        : "no store listing found";
+      const here =
+        homeReading?.liveAds === null || homeReading === null
+          ? `${escapeHtml(home)} unread`
+          : `${homeReading.liveAds} in ${escapeHtml(home)}`;
+      return `<li><span class="rival-name"><i class="swatch tone-${column.tone % 4}"></i> ${escapeHtml(column.name)}</span><span class="rival-note">${live} &middot; ${base} &middot; ${here}</span></li>`;
+    })
+    .join("");
+
+  // The counter reading only says something about a rival that is actually
+  // buying, so it is drawn for the busiest one and named rather than blended.
+  const busiest = [...perRival].sort(
+    (left, right) => right.summary.marketsWithAds - left.summary.marketsWithAds,
+  )[0];
+  const pressure = busiest ? byPressure(busiest.readings) : [];
+  const maxPressure = pressure[0] ? (pressurePer10k(pressure[0]) ?? 0) : 0;
+  const homeRank = busiest?.homeReading
+    ? pressure.findIndex((entry) => entry.market === home) + 1
+    : 0;
+  const homePressure = busiest?.homeReading ? pressurePer10k(busiest.homeReading) : null;
 
   const pressureRows = pressure
     .slice(0, MAX_PRESSURE_ROWS)
-    .concat(homeRank > MAX_PRESSURE_ROWS && homeReading ? [homeReading] : [])
+    .concat(homeRank > MAX_PRESSURE_ROWS && busiest?.homeReading ? [busiest.homeReading] : [])
     .map((entry) => {
       const value = pressurePer10k(entry) ?? 0;
       return `<li>
         <span class="market-cc">${escapeHtml(entry.market)}</span>
-        ${bar(value, maxPressure, "ads", false)}
+        ${bar(value, maxPressure, `tone-${(busiest?.column.tone ?? 0) % 4}`, false)}
         <span class="market-num">${value.toFixed(1)}</span>
       </li>`;
     })
     .join("");
 
-  const homeLine =
-    homeReading && homeReading.liveAds !== null && summary.largestBase
-      ? `In ${escapeHtml(home)}, the market this report reads in depth, they run ${homeReading.liveAds} today. Their largest customer base is ${escapeHtml(summary.largestBase.market)}, at ${(summary.largestBase.ratings ?? 0).toLocaleString("en-GB")} ratings.`
-      : "";
-
-  const quiet = summary.quietWithCustomers
+  const quiet = (busiest?.summary.quietWithCustomers ?? [])
     .slice(0, 8)
     .map((entry) => `${escapeHtml(entry.market)} (${(entry.ratings ?? 0).toLocaleString("en-GB")})`)
     .join(", ");
 
   return `<section>
     <h2>Where their market is</h2>
-    <p class="lede">${escapeHtml(lead?.name ?? "The closest rival")} counted in ${summary.marketsRead} markets. Advertisements say where they are buying today. Ratings say where their customers already are. The two do not sit in the same places, and picking one country to watch is how the wrong one gets picked. ${homeLine}</p>
-    <ul class="markets">
-      <li class="market-head">
-        <span class="market-cc">&nbsp;</span>
-        <span class="market-none">Ratings, lifetime (square root scale)</span>
-        <span class="market-num"></span>
-        <span class="market-none">Live advertisements</span>
-        <span class="market-num">&nbsp;</span>
-      </li>
-      ${rows.map((entry) => marketRow(entry, maxRatings, maxAds)).join("")}
-    </ul>
+    <p class="lede">${columns.length === 1 ? "One rival" : `${columns.length} rivals`} counted in ${rows.length} markets each. Advertisements say where they are buying today. Ratings say where their customers already are. The two do not sit in the same places, and watching one country is how the wrong one gets watched.</p>
+    <ul class="rivals">${standings}</ul>
+    ${matrix(rows, columns, "liveAds", "Who is buying where, today")}
+    ${matrix(rows, columns, "ratings", "Where the customers already are (square root scale)")}
     ${
       pressureRows
-        ? `<h3>The reading that argues with it: advertisements per 10,000 ratings</h3>
+        ? `<h3>The reading that argues with it: ${escapeHtml(busiest?.column.name ?? "")} advertisements per 10,000 ratings</h3>
     <p class="lede">Raw counts favour a big country. Dividing one by the other reorders the list completely. A market with a small base scores high on a handful of advertisements, so this reading has its own distortion, and it is here to stop the first one being read alone.${homePressure !== null && homeRank > 0 ? ` ${escapeHtml(home)} ranks ${homeRank} of ${pressure.length} on it, at ${homePressure.toFixed(1)}.` : ""}</p>
     <ul class="markets markets-narrow">${pressureRows}</ul>`
         : ""
     }
-    ${quiet ? `<p class="caveat">Customers and no campaign: ${quiet}. An absent campaign is not an absent audience.</p>` : ""}
+    ${quiet ? `<p class="caveat">${escapeHtml(busiest?.column.name ?? "")} has customers and no campaign in: ${quiet}. An absent campaign is not an absent audience.</p>` : ""}
     <p class="caveat">Neither number is money. An advertisement count counts objects, and a buyer can spend more on twelve than on seventy. A rating count is a lifetime total that only rises, so it describes the installed base rather than demand this month. The library publishes no spend and no impressions for a commercial advertiser.</p>
   </section>`;
 }
@@ -480,20 +537,20 @@ a:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-
 .rival-note { font-family: var(--mono); font-size: 12px; color: var(--text-soft); }
 .chips { display: flex; flex-wrap: wrap; gap: 6px; }
 .markets { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 5px; }
-.markets li { display: grid; grid-template-columns: 30px 1fr 88px 150px 66px; gap: 10px; align-items: center; }
+.markets li { display: grid; grid-template-columns: var(--cols, 30px 1fr 62px); gap: 10px; align-items: center; }
 .markets.markets-narrow li { grid-template-columns: 30px 1fr 54px; }
-.market-head { padding-bottom: 4px; border-bottom: 1px solid var(--line); margin-bottom: 3px; }
 .market-cc { font-family: var(--mono); font-size: 12px; letter-spacing: .06em; color: var(--text-soft); }
 .bar-track { display: block; height: 9px; background: var(--surface-sunk); border-radius: 2px; }
 .bar-fill { display: block; height: 9px; border-radius: 2px; }
-.bar-fill.base { background: var(--accent); }
-.bar-fill.ads { background: var(--warn); }
+.bar-fill.tone-0 { background: var(--tone-0); } .bar-fill.tone-1 { background: var(--tone-1); }
+.bar-fill.tone-2 { background: var(--tone-2); } .bar-fill.tone-3 { background: var(--tone-3); }
+.rival-name .swatch { margin-right: 2px; vertical-align: baseline; }
 .market-num { font-family: var(--mono); font-size: 12px; text-align: right; font-variant-numeric: tabular-nums; color: var(--text-soft); }
 .market-none { font-family: var(--mono); font-size: 11px; color: var(--text-soft); opacity: .75; white-space: nowrap; }
 /* Below this width five columns do not fit, so the bars go and the numbers stay.
    Dropping cells instead would wrap a row and put a count under another country. */
 @media (max-width: 720px) {
-  .markets:not(.markets-narrow) li { grid-template-columns: 30px 1fr 62px; }
+  .markets:not(.markets-narrow) li { grid-template-columns: var(--cols-narrow, 30px 62px); }
   .markets:not(.markets-narrow) li > .bar-track { display: none; }
 }
 .themes { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 9px; }
@@ -516,9 +573,6 @@ a:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-
   .hook { grid-template-columns: 1fr; gap: 12px; }
   .themes li { grid-template-columns: 1fr 46px; }
   .theme-track { grid-column: 1 / -1; }
-  /* Matched on .markets li so it outranks the grid rule, which is more specific
-     than a bare .market-head and silently kept the header on screen. */
-  .markets li.market-head { display: none; }
 }
 @media (prefers-reduced-motion: reduce) { * { transition: none !important; animation: none !important; } }
 `;

@@ -45,6 +45,14 @@ import type {
 /** How many rivals get the expensive treatment: a library search and a review sweep. */
 const DEEP_RIVALS = 6;
 
+/**
+ * How many matched rivals get counted market by market. Each one costs a page
+ * load per market, so this is the slowest stage in the pipeline and the number
+ * is a budget rather than a preference. Anything above it is named in the gaps
+ * rather than dropped quietly.
+ */
+const SWEEP_ADVERTISERS = 4;
+
 function log(message: string): void {
   process.stdout.write(`${message}\n`);
 }
@@ -62,6 +70,23 @@ export function validateProduct(value: unknown): Product {
     throw new Error("product file needs brandTerms, or the product lists itself as its own rival");
   }
   return product as Product;
+}
+
+/**
+ * Which matched rivals get counted market by market, and which are named as
+ * skipped.
+ *
+ * Exported because the alternative is untested. The first version of the sweep
+ * ran on `advertisers[0]`, which put a rival that advertises nowhere on the
+ * published page and left the one with a thirty market campaign unread. A
+ * mutation back to a single advertiser has to turn a test red, and nothing
+ * inside `main` can be reached to do that.
+ */
+export function planSweep(
+  advertisers: readonly Advertiser[],
+  limit: number,
+): { swept: Advertiser[]; skipped: Advertiser[] } {
+  return { swept: advertisers.slice(0, limit), skipped: advertisers.slice(limit) };
 }
 
 /**
@@ -194,23 +219,34 @@ async function main(): Promise<void> {
   }
 
   /**
-   * The sweep covers the closest matched rival only. It is one page load per
-   * market, so running it for every rival would multiply the slowest stage in
-   * the pipeline by six for a question one rival answers.
+   * Every matched rival is swept, not only the closest one.
+   *
+   * The first version swept `advertisers[0]` to keep the slowest stage cheap.
+   * That put SnoreLab on the published report, and SnoreLab is dark in all forty
+   * markets, so the geography section said nothing while ShutEye's thirty market
+   * campaign sat one place further down the list and was never read. A
+   * comparison of one rival is not a comparison.
    */
   const worldMarkets = product.worldMarkets ?? WORLD_MARKETS;
-  const lead = advertisers[0];
-  let marketSweep: MarketReading[] = [];
-  if (!lead) {
+  const { swept, skipped } = planSweep(advertisers, SWEEP_ADVERTISERS);
+  const marketSweep: MarketReading[] = [];
+  if (swept.length === 0) {
     gaps.push("No rival was matched to an advertiser account, so no market sweep could be run.");
-  } else {
-    const leadRival = rivals.find((rival) => rival.rivalId === lead.rivalId);
-    log(`\n== counting ${lead.name} in ${worldMarkets.length} markets`);
-    marketSweep = await readMarketSweep(
+  }
+  if (skipped.length > 0) {
+    gaps.push(
+      `The market sweep covers the ${swept.length} closest matched rivals. ` +
+        `Not swept: ${skipped.map((advertiser) => advertiser.name).join(", ")}.`,
+    );
+  }
+  for (const advertiser of swept) {
+    const rival = rivals.find((entry) => entry.rivalId === advertiser.rivalId);
+    log(`\n== counting ${advertiser.name} in ${worldMarkets.length} markets`);
+    const readings = await readMarketSweep(
       { readTexts, lookupApp },
       {
-        advertiserId: lead.advertiserId,
-        appleAppId: leadRival?.appleAppId ?? null,
+        advertiserId: advertiser.advertiserId,
+        appleAppId: rival?.appleAppId ?? null,
         markets: worldMarkets,
         onMarket: (reading) =>
           log(
@@ -219,9 +255,12 @@ async function main(): Promise<void> {
           ),
       },
     );
-    const unread = marketSweep.filter((reading) => reading.liveAds === null).map((reading) => reading.market);
+    marketSweep.push(...readings);
+    const unread = readings.filter((reading) => reading.liveAds === null).map((reading) => reading.market);
     if (unread.length > 0) {
-      gaps.push(`The advertisement count could not be read in ${unread.length} markets: ${unread.join(", ")}.`);
+      gaps.push(
+        `${advertiser.name}: the advertisement count could not be read in ${unread.length} markets: ${unread.join(", ")}.`,
+      );
     }
   }
 

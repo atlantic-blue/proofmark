@@ -189,13 +189,60 @@ test("the index lists every product report", () => {
   assert.match(buildIndex([]), /No report has been produced yet/);
 });
 
-const SWEEP = [
-  { market: "US", advertiserId: "149967288461419", liveAds: 70, ratings: 349104, formattedPrice: "Free" },
-  { market: "GB", advertiserId: "149967288461419", liveAds: 12, ratings: 33470, formattedPrice: "Free" },
-  { market: "TW", advertiserId: "149967288461419", liveAds: 0, ratings: 12175, formattedPrice: "Free" },
-  { market: "FI", advertiserId: "149967288461419", liveAds: 18, ratings: 473, formattedPrice: "Free" },
-  { market: "ZZ", advertiserId: "149967288461419", liveAds: null, ratings: null, formattedPrice: null },
-];
+
+const SNORELAB = "149967288461419";
+const SHUTEYE = "105561090976700";
+
+function sweepFor(advertiserId: string, rows: readonly [string, number | null, number | null][]) {
+  return rows.map(([market, liveAds, ratings]) => ({
+    market,
+    advertiserId,
+    liveAds,
+    ratings,
+    formattedPrice: ratings === null ? null : "Free",
+  }));
+}
+
+/** SnoreLab is dark everywhere. ShutEye is not. That contrast is the point. */
+const TWO_RIVALS = {
+  ...PICTURE,
+  advertisers: [
+    ...PICTURE.advertisers,
+    {
+      platform: "meta" as const,
+      advertiserId: SHUTEYE,
+      rivalId: "shuteye",
+      name: "ShutEye - Sleep Tracker, Recorder",
+      matchConfidence: "probable" as const,
+      activeAdCountAtLeast: 10,
+    },
+  ],
+  marketSweep: [
+    ...sweepFor(SNORELAB, [
+      ["US", 0, 57114],
+      ["GB", 0, 14064],
+      ["TW", 0, 12175],
+      ["ZZ", null, null],
+    ]),
+    ...sweepFor(SHUTEYE, [
+      ["US", 70, 349104],
+      ["GB", 12, 33470],
+      ["TW", 0, 12175],
+      ["ZZ", null, null],
+    ]),
+  ],
+};
+
+const ONE_RIVAL = {
+  ...PICTURE,
+  marketSweep: sweepFor(SNORELAB, [
+    ["US", 70, 349104],
+    ["GB", 12, 33470],
+    ["TW", 0, 12175],
+    ["FI", 18, 473],
+    ["ZZ", null, null],
+  ]),
+};
 
 test("a picture written before the sweep existed still renders", () => {
   const page = buildSite(PICTURE);
@@ -204,35 +251,83 @@ test("a picture written before the sweep existed still renders", () => {
   assert.ok(!page.includes("markets counted"), "an absent sweep must not claim a market count");
 });
 
-test("the market section carries both orderings, because they disagree", () => {
-  const page = buildSite({ ...PICTURE, marketSweep: SWEEP });
-  assert.match(page, /Where their market is/);
-  assert.match(page, /GB in depth, 5 markets counted/);
-  assert.match(page, /advertisements per 10,000 ratings/);
+/** The row for one market out of one named matrix, so cells can be counted. */
+function matrixRow(page: string, heading: string, market: string): string {
+  const from = page.indexOf(heading);
+  assert.ok(from > -1, `no matrix headed "${heading}"`);
+  const list = page.slice(from, page.indexOf("</ul>", from));
+  const rows = [...list.matchAll(/<li>[\s\S]*?<\/li>/g)].map((match) => match[0]);
+  const row = rows.find((candidate) => candidate.includes(`>${market}<`));
+  assert.ok(row, `no row for ${market} under "${heading}"`);
+  return row;
+}
 
-  // Raw counts put the United States first. Divided by the base, Finland leads
-  // and the United States is last. A page showing only one of them is a way of
-  // choosing the answer.
-  const raw = page.indexOf('<ul class="markets">');
-  const ranked = page.indexOf('markets markets-narrow');
-  assert.ok(raw > -1 && ranked > raw, "the raw ordering comes first, the counter reading after it");
-  assert.ok(page.indexOf(">US<", raw) < page.indexOf(">FI<", raw), "raw ordering leads with the largest base");
-  assert.ok(page.indexOf(">FI<", ranked) < page.indexOf(">US<", ranked), "pressure ordering leads with the smallest base");
+test("every swept rival gets a column, not just the closest one", () => {
+  const page = buildSite(TWO_RIVALS);
+  assert.match(page, /2 rivals counted in 4 markets each/);
+
+  // Counted in the row, not in the page. Counting how often a rival's name
+  // appears passes while its column is missing, because the name is also in the
+  // standings and the counter reading. This is the whole defect: SnoreLab was
+  // the closest rival, SnoreLab is dark everywhere, and the published page said
+  // nothing while ShutEye went unread.
+  const live = matrixRow(page, "Who is buying where, today", "US");
+  const cells = [...live.matchAll(/<span class="market-num">([\s\S]*?)<\/span>/g)].map((match) =>
+    (match[1] ?? "").replace(/<[^>]*>/g, "").trim(),
+  );
+  assert.equal(cells.length, 2, `expected one cell per rival, got ${cells.length}: ${cells.join(" | ")}`);
+  assert.deepEqual(cells, ["none", "70"], "SnoreLab runs none in the United States, ShutEye runs 70");
+
+  const base = matrixRow(page, "Where the customers already are", "US");
+  const baseCells = [...base.matchAll(/<span class="market-num">([\s\S]*?)<\/span>/g)].map((match) =>
+    (match[1] ?? "").replace(/<[^>]*>/g, "").trim(),
+  );
+  assert.deepEqual(baseCells, ["57,114", "349,104"]);
+});
+
+test("a rival that runs nothing anywhere is stated, not left blank", () => {
+  const page = buildSite(TWO_RIVALS);
+  assert.match(page, /runs nothing anywhere today/);
+  assert.match(page, /live in 2 of 3 markets, busiest US at 70/);
+});
+
+test("the counter reading names the rival it describes", () => {
+  const page = buildSite(TWO_RIVALS);
+  // Only ShutEye is buying, so the pressure reading is about ShutEye and says
+  // so. Blending a dark rival into it would report a pressure nobody has.
+  assert.match(page, /ShutEye - Sleep Tracker, Recorder advertisements per 10,000 ratings/);
+});
+
+test("the two orderings still disagree, which is why both are drawn", () => {
+  const page = buildSite(ONE_RIVAL);
+  const ranked = page.indexOf("argues with it");
+  assert.ok(ranked > -1, "the counter reading must be drawn");
+  assert.ok(page.indexOf(">FI<", ranked) < page.indexOf(">US<", ranked), "pressure leads with the smallest base");
+  const raw = page.indexOf("Where the customers already are");
+  assert.ok(page.indexOf(">US<", raw) < page.indexOf(">FI<", raw), "the customer base ordering leads with the largest");
 });
 
 test("an unread market never renders as a market running nothing", () => {
-  const page = buildSite({ ...PICTURE, marketSweep: SWEEP });
+  const page = buildSite(TWO_RIVALS);
   assert.match(page, /unread/);
-  assert.match(page, /none live/);
+  assert.match(page, /none/);
 });
 
-test("a market with customers and no campaign is named", () => {
-  const page = buildSite({ ...PICTURE, marketSweep: SWEEP });
-  assert.match(page, /Customers and no campaign: TW \(12,175\)/);
+test("a market with customers and no campaign is named against the rival it belongs to", () => {
+  const page = buildSite(TWO_RIVALS);
+  assert.match(page, /ShutEye - Sleep Tracker, Recorder has customers and no campaign in: TW \(12,175\)/);
+});
+
+test("the row template is declared on the list, so a narrow screen can still override it", () => {
+  const page = buildSite(TWO_RIVALS);
+  // An inline grid template on the row would outrank the media query and the
+  // matrix would never respond. The custom property is what keeps it able to.
+  assert.match(page, /<ul class="markets" style="--cols:34px 1fr 62px 1fr 62px;--cols-narrow:34px 62px 62px">/);
+  assert.ok(!/<li style="grid-template-columns/.test(page), "no row may pin its own template");
 });
 
 test("the page never claims the counts are money", () => {
-  const page = buildSite({ ...PICTURE, marketSweep: SWEEP });
+  const page = buildSite(TWO_RIVALS);
   assert.match(page, /Neither number is money/);
   assert.match(page, /publishes no spend/);
 });

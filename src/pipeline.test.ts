@@ -4,8 +4,8 @@ import { isOurOwnProduct, isRelevant, slugify } from "./apple.ts";
 import { findContainerIds, scan } from "./platforms.ts";
 import { summariseVoice, themesFor } from "./voice.ts";
 import { buildReport, plural } from "./report.ts";
-import { validateProduct } from "./run.ts";
-import type { DistributionPicture, Product, Review } from "./types.ts";
+import { planSweep, validateProduct } from "./run.ts";
+import type { Advertiser, DistributionPicture, Product, Review } from "./types.ts";
 
 const PRODUCT: Product = {
   productId: "hush-log",
@@ -341,20 +341,45 @@ test("the report opens with the geography, so a one market finding is never read
   const report = buildReport({
     ...PICTURE,
     marketSweep: [
-      { market: "US", advertiserId: "1", liveAds: 70, ratings: 349104, formattedPrice: "Free" },
-      { market: "GB", advertiserId: "1", liveAds: 12, ratings: 33470, formattedPrice: "Free" },
-      { market: "IE", advertiserId: "1", liveAds: 0, ratings: 2085, formattedPrice: "Free" },
+      { market: "US", advertiserId: "149967288461419", liveAds: 70, ratings: 349104, formattedPrice: "Free" },
+      { market: "GB", advertiserId: "149967288461419", liveAds: 12, ratings: 33470, formattedPrice: "Free" },
+      { market: "IE", advertiserId: "149967288461419", liveAds: 0, ratings: 2085, formattedPrice: "Free" },
     ],
   });
   assert.ok(
     report.indexOf("## Where their market is") < report.indexOf("## How the category sells"),
     "geography has to come before anything read in one country",
   );
-  assert.match(report, /US is where they buy hardest, at 70 live/);
-  assert.match(report, /GB, the market read in depth below, carries 12 live advertisements/);
-  assert.match(report, /Live advertising in 2 of 3 markets read/);
-  assert.match(report, /IE: 2,085 ratings, nothing live/);
+  assert.match(report, /One rival counted market by market/);
+  assert.match(report, /\*\*SnoreLab\*\*: live in 2 of 3 markets, busiest US at 70/);
+  assert.match(report, /largest base US at 349,104 ratings/);
+  assert.match(report, /12 live advertisements in GB/);
+  assert.match(report, /- IE: 2,085 ratings, nothing live/);
   assert.match(report, /Neither number is money/);
+});
+
+test("every swept rival is reported, and a rival buying nothing says so", () => {
+  const report = buildReport({
+    ...PICTURE,
+    advertisers: [
+      ...PICTURE.advertisers,
+      {
+        platform: "meta",
+        advertiserId: "105561090976700",
+        rivalId: "shuteye",
+        name: "ShutEye",
+        matchConfidence: "probable",
+        activeAdCountAtLeast: 10,
+      },
+    ],
+    marketSweep: [
+      { market: "US", advertiserId: "149967288461419", liveAds: 0, ratings: 57114, formattedPrice: "Free" },
+      { market: "US", advertiserId: "105561090976700", liveAds: 70, ratings: 349104, formattedPrice: "Free" },
+    ],
+  });
+  assert.match(report, /2 rivals counted market by market/);
+  assert.match(report, /\*\*SnoreLab\*\*: runs nothing anywhere today/);
+  assert.match(report, /\*\*ShutEye\*\*: live in 1 of 1 markets, busiest US at 70/);
 });
 
 test("a report with no sweep says so rather than staying silent about it", () => {
@@ -365,7 +390,39 @@ test("a report with no sweep says so rather than staying silent about it", () =>
 test("one live advertisement is written as one, not as 1 advertisements", () => {
   const report = buildReport({
     ...PICTURE,
-    marketSweep: [{ market: "GB", advertiserId: "1", liveAds: 1, ratings: 10, formattedPrice: "Free" }],
+    marketSweep: [
+      { market: "GB", advertiserId: "149967288461419", liveAds: 1, ratings: 10, formattedPrice: "Free" },
+    ],
   });
-  assert.match(report, /carries 1 live advertisement\./);
+  assert.match(report, /1 live advertisement in GB\./);
+});
+
+function advertiser(name: string): Advertiser {
+  return {
+    platform: "meta",
+    advertiserId: name,
+    rivalId: name,
+    name,
+    matchConfidence: "confirmed",
+    activeAdCountAtLeast: 1,
+  };
+}
+
+test("the sweep covers every matched rival, not only the closest one", () => {
+  const plan = planSweep([advertiser("SnoreLab"), advertiser("ShutEye")], 4);
+  assert.deepEqual(plan.swept.map((entry) => entry.name), ["SnoreLab", "ShutEye"]);
+  assert.deepEqual(plan.skipped, []);
+});
+
+test("rivals past the budget are named as skipped, never dropped quietly", () => {
+  const plan = planSweep(
+    [advertiser("a"), advertiser("b"), advertiser("c"), advertiser("d"), advertiser("e")],
+    4,
+  );
+  assert.equal(plan.swept.length, 4);
+  assert.deepEqual(plan.skipped.map((entry) => entry.name), ["e"]);
+});
+
+test("no matched rival plans no sweep rather than throwing", () => {
+  assert.deepEqual(planSweep([], 4), { swept: [], skipped: [] });
 });
