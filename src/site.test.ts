@@ -331,3 +331,18 @@ test("the page never claims the counts are money", () => {
   assert.match(page, /Neither number is money/);
   assert.match(page, /publishes no spend/);
 });
+
+test("a rival matched to an advertiser is a link to its own page, and one that is not stays plain", () => {
+  const page = buildSite({
+    ...PICTURE,
+    rivals: [
+      ...PICTURE.rivals,
+      { rivalId: "sleepwatch", name: "SleepWatch", appleAppId: "1", seller: "Bodymatter", domain: null, formattedPrice: "Free", isFree: true, ratingCount: 59064, averageRating: 4.6, releaseDate: "2016-01-01", lastUpdated: "2026-01-01", foundVia: [{ term: "sleep tracker", position: 2 }] },
+    ],
+  });
+  assert.match(page, /<a href="\.\/snorelab\/">SnoreLab<\/a>/);
+  // A link to a page that was never written is worse than no link, so a rival
+  // with no advertiser account must not get one.
+  assert.ok(!/<a href="\.\/sleepwatch\/">/.test(page), "an unmatched rival has no page to link to");
+  assert.match(page, /SleepWatch/);
+});

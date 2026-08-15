@@ -33,6 +33,7 @@ import {
 import { readPresence } from "./platforms.ts";
 import { buildReport } from "./report.ts";
 import { buildIndex, buildSite } from "./site.ts";
+import { buildRivalPage, rivalPagePath } from "./rivalPage.ts";
 import { summariseVoice } from "./voice.ts";
 import type {
   Ad,
@@ -100,6 +101,23 @@ export function planSweep(
 }
 
 /**
+ * One page per rival that has an advertiser account, written beside the product
+ * page so the link is a folder away and needs no server.
+ */
+async function writeRivalPages(picture: DistributionPicture, outputDir: string): Promise<number> {
+  const matched = new Set(picture.advertisers.map((advertiser) => advertiser.rivalId));
+  let written = 0;
+  for (const rival of picture.rivals) {
+    if (!matched.has(rival.rivalId)) continue;
+    const dir = join(outputDir, rivalPagePath(rival));
+    await mkdir(dir, { recursive: true });
+    await writeFile(join(dir, "index.html"), buildRivalPage(picture, rival), "utf8");
+    written += 1;
+  }
+  return written;
+}
+
+/**
  * Rebuilds the landing page from every report already on disk, so publishing one
  * product never drops the others off the front page.
  */
@@ -151,6 +169,7 @@ async function main(): Promise<void> {
     ) as DistributionPicture;
     await writeFile(join(outputDir, "REPORT.md"), buildReport(saved), "utf8");
     await writeFile(join(outputDir, "index.html"), buildSite(saved), "utf8");
+    await writeRivalPages(saved, outputDir);
     await writeSiteIndex();
     log(`rewrote ${outputDir} from the picture read on ${saved.readAt.slice(0, 10)}`);
     return;
@@ -370,6 +389,7 @@ async function main(): Promise<void> {
   await writeFile(join(outputDir, "picture.json"), JSON.stringify(picture, null, 1), "utf8");
   await writeFile(join(outputDir, "REPORT.md"), buildReport(picture), "utf8");
   await writeFile(join(outputDir, "index.html"), buildSite(picture), "utf8");
+  await writeRivalPages(picture, outputDir);
   await writeSiteIndex();
 
   log(`\nwrote ${outputDir}: REPORT.md, index.html and picture.json`);

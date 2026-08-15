@@ -74,17 +74,18 @@ function monthTicks(axis: Span): Date[] {
   return ticks;
 }
 
-function statCard(value: string, label: string): string {
+export function statCard(value: string, label: string): string {
   return `<div class="stat"><div class="stat-value">${escapeHtml(value)}</div><div class="stat-label">${escapeHtml(label)}</div></div>`;
 }
 
-function flightChart(picture: DistributionPicture): string {
-  const readAt = new Date(picture.readAt);
-  const axis = axisOf(picture.ads, readAt);
+/** Takes the advertisements rather than the picture, so one rival's page can plot only theirs. */
+export function flightChart(ads: readonly Ad[], readAtIso: string): string {
+  const readAt = new Date(readAtIso);
+  const axis = axisOf(ads, readAt);
   if (!axis) return `<p class="empty">No advertisement carried a date, so there is nothing to plot.</p>`;
 
-  const advertisers = [...new Set(picture.ads.map((ad) => ad.advertiser ?? "unknown"))];
-  const rows = picture.ads
+  const advertisers = [...new Set(ads.map((ad) => ad.advertiser ?? "unknown"))];
+  const rows = ads
     .map((ad) => ({ ad, span: spanOf(ad, readAt) }))
     .filter((entry): entry is { ad: Ad; span: Span } => entry.span !== null)
     .sort((left, right) => left.span.start.getTime() - right.span.start.getTime())
@@ -119,7 +120,7 @@ function flightChart(picture: DistributionPicture): string {
     </div>`;
 }
 
-function hookCard(hook: ProvenHook, topCreatives: number): string {
+export function hookCard(hook: ProvenHook, topCreatives: number): string {
   const share = topCreatives > 0 ? Math.round((hook.creatives / topCreatives) * 100) : 0;
   const copy =
     hook.copy.length > 0
@@ -162,7 +163,7 @@ const MAX_PRESSURE_ROWS = 12;
  * every other market flattens into a line. The scale is named on the page, since
  * a reader comparing two bars deserves to know they are not comparing distances.
  */
-function bar(value: number, max: number, tone: string, root: boolean): string {
+export function bar(value: number, max: number, tone: string, root: boolean): string {
   if (max <= 0) return `<span class="bar-track"></span>`;
   const share = root ? Math.sqrt(value) / Math.sqrt(max) : value / max;
   const width = Math.max(value > 0 ? 1.5 : 0, Math.min(100, share * 100));
@@ -330,11 +331,19 @@ function marketSection(picture: DistributionPicture): string {
 }
 
 function priceSection(picture: DistributionPicture): string {
+  // A rival matched to an advertiser account has a page of its own, so its name
+  // is a link. One that is not matched has nothing behind it, and a link to an
+  // empty page is worse than no link.
+  const hasPage = new Set(picture.advertisers.map((advertiser) => advertiser.rivalId));
   const rows = picture.rivals
     .slice(0, MAX_RIVALS)
     .map(
       (rival) =>
-        `<li><span class="rival-name">${escapeHtml(rival.name)}</span>` +
+        `<li><span class="rival-name">${
+          hasPage.has(rival.rivalId)
+            ? `<a href="./${escapeHtml(rival.rivalId)}/">${escapeHtml(rival.name)}</a>`
+            : escapeHtml(rival.name)
+        }</span>` +
         `<span class="chip ${rival.isFree ? "chip-free" : "chip-paid"}">${escapeHtml(rival.formattedPrice || "unknown")}</span>` +
         `<span class="rival-note">${rival.ratingCount > 0 ? `${rival.ratingCount.toLocaleString("en-GB")} ratings` : "ratings not published"}${rival.lastUpdated ? `, updated ${escapeHtml(rival.lastUpdated)}` : ""}</span></li>`,
     )
@@ -457,7 +466,7 @@ function bidsSection(picture: DistributionPicture): string {
   </section>`;
 }
 
-const STYLES = `
+export const STYLES = `
 :root {
   --ground: #EDF0EF; --surface: #FFFFFF; --surface-sunk: #E4E9E7; --line: #CBD5D2;
   --text: #16211F; --text-soft: #55635F; --accent: #0F7A6C; --accent-soft: #D3E7E2; --warn: #B5721B;
@@ -616,7 +625,7 @@ export function buildSite(picture: DistributionPicture): string {
   <section>
     <h2>When they ran</h2>
     <p class="lede">Every advertisement captured, on one axis. Each bar is a run, an outlined bar is still live, and colour is the advertiser. Click a bar to open that advertisement in the library.</p>
-    ${flightChart(picture)}
+    ${flightChart(picture.ads, picture.readAt)}
     ${
       lengths.length
         ? `<p class="caveat">Shortest ${lengths[0]} days, middle of the set ${middle} days, longest ${lengths[lengths.length - 1]} days, ${lengths.reduce((sum, days) => sum + days, 0)} advertisement days in total. ${videos} of ${ads.length} are video. Placement inside Meta, meaning Facebook against Instagram, is drawn as an icon with no readable label, so it is not captured yet.</p>`
