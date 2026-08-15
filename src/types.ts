@@ -85,6 +85,44 @@ export interface Ad {
   readonly body: string;
 }
 
+/** One age band of one country's delivered reach. */
+export interface ReachSlice {
+  readonly ageRange: string;
+  readonly male: number;
+  readonly female: number;
+  readonly unknown: number;
+}
+
+export interface CountryReach {
+  readonly country: string;
+  readonly slices: readonly ReachSlice[];
+}
+
+/**
+ * What the library publishes about one advertisement beyond its copy.
+ *
+ * Every audience field here exists because of a European Union obligation, so it
+ * is present for an advertisement served in the Union and absent everywhere
+ * else. Great Britain has none of it. Null carries that absence and null is
+ * never zero: "reached nobody" and "the rule does not apply here" are different
+ * facts and a report that merges them is wrong in both directions.
+ */
+export interface AdDetail {
+  readonly libraryId: string;
+  /** People reached in the European Union. Null outside it. */
+  readonly euTotalReach: number | null;
+  /** What the buyer asked for. */
+  readonly targetedAgeMin: number | null;
+  readonly targetedAgeMax: number | null;
+  readonly targetedGender: string | null;
+  readonly targetedCountries: readonly string[];
+  /** What the platform actually delivered. Rarely the same shape. */
+  readonly deliveredReach: readonly CountryReach[];
+  /** Who paid, and who the advertising is for. Not always the same company. */
+  readonly payers: readonly string[];
+  readonly beneficiaries: readonly string[];
+}
+
 /** What a rival's own site says they have measurement built for. */
 export interface PlatformPresence {
   readonly rivalId: string;
@@ -183,5 +221,11 @@ export interface DistributionPicture {
    * before the sweep existed, so every reader must treat it as optional.
    */
   readonly marketSweep?: readonly MarketReading[];
+  /**
+   * The audience behind individual advertisements. Only advertisements served in
+   * the European Union have one, so this is a slice and never the whole set.
+   * Absent on any picture written before the reader existed.
+   */
+  readonly adDetails?: readonly AdDetail[];
   readonly gaps: readonly string[];
 }

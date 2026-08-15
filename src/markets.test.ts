@@ -1,6 +1,7 @@
 import { deepStrictEqual, ok, strictEqual } from "node:assert/strict";
 import { test } from "node:test";
 import {
+  busiestEuMarket,
   byAdvertiser,
   byCustomerBase,
   byPressure,
@@ -227,4 +228,33 @@ test("an advertiser column with no readings at all is all holes, never an error"
   const rows = marketMatrix([reading({ market: "US", advertiserId: "a", ratings: 5 })], ["a", "missing"]);
   strictEqual(rows[0]?.cells[1], null);
   strictEqual(rows.length, 1);
+});
+
+test("the detail market is the busiest one inside the European Union", () => {
+  const sweep = [
+    reading({ market: "US", advertiserId: "a", liveAds: 70 }),
+    reading({ market: "GB", advertiserId: "a", liveAds: 12 }),
+    reading({ market: "SE", advertiserId: "a", liveAds: 20 }),
+    reading({ market: "DK", advertiserId: "a", liveAds: 17 }),
+  ];
+  // The United States is busiest overall and publishes no audience at all, and
+  // Great Britain left the Union, so neither can answer the question.
+  strictEqual(busiestEuMarket(sweep, "a"), "SE");
+});
+
+test("a rival running nothing inside the Union has no market to read from", () => {
+  const sweep = [
+    reading({ market: "US", advertiserId: "a", liveAds: 70 }),
+    reading({ market: "SE", advertiserId: "a", liveAds: 0 }),
+    reading({ market: "DE", advertiserId: "a", liveAds: null }),
+  ];
+  strictEqual(busiestEuMarket(sweep, "a"), null);
+});
+
+test("one rival's markets never decide another rival's detail market", () => {
+  const sweep = [
+    reading({ market: "SE", advertiserId: "a", liveAds: 20 }),
+    reading({ market: "SE", advertiserId: "b", liveAds: 0 }),
+  ];
+  strictEqual(busiestEuMarket(sweep, "b"), null);
 });

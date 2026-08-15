@@ -107,6 +107,90 @@ export async function readTexts(
   return texts;
 }
 
+/**
+ * Fetches the detail response for many advertisements of one advertiser.
+ *
+ * The numbers are not on the card. They arrive when a reader opens one
+ * advertisement, which fires AdLibraryV3AdDetailsQuery. Clicking through every
+ * advertisement would be one page interaction each, so instead one real click
+ * is performed to capture the request the page makes, and every other
+ * advertisement is fetched by replaying that request with a different
+ * identifier. The same trick the library's own pagination call taught us.
+ *
+ * A refusal comes back as null for that advertisement rather than as an empty
+ * detail, so a rate limit can never be published as "this advertisement reached
+ * nobody".
+ */
+export async function readAdDetailBodies(
+  advertiserPageUrl: string,
+  libraryIds: readonly string[],
+  options: { readonly gapMs?: number } = {},
+): Promise<Map<string, string | null>> {
+  const gapMs = options.gapMs ?? 1500;
+  const bodies = new Map<string, string | null>();
+  if (libraryIds.length === 0) return bodies;
+
+  const browser = await puppeteer.launch({
+    executablePath: CHROME_PATH,
+    headless: true,
+    args: ["--no-sandbox", "--disable-blink-features=AutomationControlled"],
+    defaultViewport: { width: 1440, height: 1600 },
+  });
+
+  try {
+    const page = await browser.newPage();
+    await page.setUserAgent(USER_AGENT);
+
+    let template: string | null = null;
+    page.on("request", (request) => {
+      if (template) return;
+      const post = request.postData() ?? "";
+      if (post.includes("AdLibraryV3AdDetailsQuery")) template = post;
+    });
+
+    await page.goto(advertiserPageUrl, { waitUntil: "networkidle2", timeout: 120_000 });
+    await sleep(4000);
+
+    // One real mouse click, purely to make the page issue the query so its exact
+    // body can be copied. A synthetic click on the label does nothing, because
+    // the handler is delegated and wants real coordinates.
+    for (const handle of await page.$$("span,div,a")) {
+      const label = await handle.evaluate((node) => (node.textContent ?? "").trim());
+      if (label !== "See ad details") continue;
+      await handle.click().catch(() => {});
+      break;
+    }
+    await sleep(6000);
+    if (!template) throw new Error("never saw a detail request to copy");
+
+    for (const libraryId of libraryIds) {
+      const body = await page.evaluate(
+        async (rawTemplate: string, adArchiveId: string) => {
+          const form = new URLSearchParams(rawTemplate);
+          const variables = JSON.parse(form.get("variables") ?? "{}");
+          variables.adArchiveID = adArchiveId;
+          form.set("variables", JSON.stringify(variables));
+          const response = await fetch("/api/graphql/", {
+            method: "POST",
+            headers: { "content-type": "application/x-www-form-urlencoded" },
+            body: form.toString(),
+            credentials: "include",
+          });
+          return await response.text();
+        },
+        template,
+        libraryId,
+      );
+      bodies.set(libraryId, /Rate limit exceeded|"errors"/.test(body) ? null : body);
+      await sleep(gapMs);
+    }
+  } finally {
+    await Promise.race([browser.close(), sleep(10_000)]);
+  }
+
+  return bodies;
+}
+
 export async function render(url: string, options: RenderOptions = {}): Promise<RenderResult> {
   const scrolls = options.scrolls ?? 8;
   const settleMs = options.settleMs ?? 3000;
