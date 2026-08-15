@@ -1,0 +1,187 @@
+{
+ "data": {
+  "ad_library_main": {
+   "ad_details": {
+    "ad_archive_id": "1583617746100371",
+    "aaa_info": {
+     "payer_beneficiary_data": [
+      {
+       "payer": "ShutEye - Sleep Tracker, Recorder",
+       "beneficiary": "北京安纳卓力信息技术有限公司"
+      },
+      {
+       "payer": "Pingme Limited",
+       "beneficiary": "北京安纳卓力信息技术有限公司"
+      }
+     ],
+     "has_violating_payer_beneficiary": false
+    },
+    "advertiser": {
+     "ad_library_page_info": {
+      "page_spend": {
+       "current_week": null,
+       "lifetime_by_disclaimer": [],
+       "weekly_by_disclaimer": [],
+       "is_political_page": false
+      }
+     }
+    },
+    "transparency_by_location": {
+     "eu_transparency": {
+      "location_audience": [
+       {
+        "name": "Guadeloupe",
+        "num_obfuscated": 0,
+        "type": "countries",
+        "excluded": false
+       },
+       {
+        "name": "Martinique",
+        "num_obfuscated": 0,
+        "type": "countries",
+        "excluded": false
+       },
+       {
+        "name": "Italy",
+        "num_obfuscated": 0,
+        "type": "countries",
+        "excluded": false
+       },
+       {
+        "name": "French Guiana",
+        "num_obfuscated": 0,
+        "type": "countries",
+        "excluded": false
+       }
+      ],
+      "gender_audience": "All",
+      "age_audience": {
+       "min": 18,
+       "max": 65
+      },
+      "eu_total_reach": 166154,
+      "age_country_gender_reach_breakdown": [
+       {
+        "country": "AT",
+        "age_gender_breakdowns": [
+         {
+          "age_range": "55-64",
+          "male": 367,
+          "female": 160,
+          "unknown": 3
+         },
+         {
+          "age_range": "65+",
+          "male": 92,
+          "female": 56,
+          "unknown": 1
+         },
+         {
+          "age_range": "25-34",
+          "male": 219,
+          "female": 81,
+          "unknown": null
+         },
+         {
+          "age_range": "18-24",
+          "male": 24,
+          "female": 4,
+          "unknown": null
+         },
+         {
+          "age_range": "45-54",
+          "male": 616,
+          "female": 319,
+          "unknown": 14
+         },
+         {
+          "age_range": "35-44",
+          "male": 617,
+          "female": 310,
+          "unknown": 10
+         }
+        ]
+       },
+       {
+        "country": "YT",
+        "age_gender_breakdowns": [
+         {
+          "age_range": "45-54",
+          "male": 14,
+          "female": 4,
+          "unknown": null
+         },
+         {
+          "age_range": "65+",
+          "male": 2,
+          "female": null,
+          "unknown": null
+         },
+         {
+          "age_range": "55-64",
+          "male": 1,
+          "female": 2,
+          "unknown": null
+         },
+         {
+          "age_range": "35-44",
+          "male": 6,
+          "female": 4,
+          "unknown": null
+         },
+         {
+          "age_range": "25-34",
+          "male": 4,
+          "female": 4,
+          "unknown": null
+         }
+        ]
+       },
+       {
+        "country": "BE",
+        "age_gender_breakdowns": [
+         {
+          "age_range": "55-64",
+          "male": 1416,
+          "female": 730,
+          "unknown": 19
+         },
+         {
+          "age_range": "65+",
+          "male": 348,
+          "female": 151,
+          "unknown": 6
+         },
+         {
+          "age_range": "25-34",
+          "male": 1054,
+          "female": 415,
+          "unknown": 7
+         },
+         {
+          "age_range": "18-24",
+          "male": 61,
+          "female": 24,
+          "unknown": null
+         },
+         {
+          "age_range": "45-54",
+          "male": 2831,
+          "female": 1582,
+          "unknown": 44
+         },
+         {
+          "age_range": "35-44",
+          "male": 2460,
+          "female": 1341,
+          "unknown": 34
+         }
+        ]
+       }
+      ]
+     }
+    }
+   }
+  }
+ }
+}

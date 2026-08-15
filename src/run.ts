@@ -16,9 +16,11 @@
 import { mkdir, readdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { collectReviews, discoverRivals, lookupApp } from "./apple.ts";
-import { readTexts, render } from "./browser.ts";
-import { readMarketSweep, WORLD_MARKETS } from "./markets.ts";
+import { readAdDetailBodies, readTexts, render } from "./browser.ts";
+import { busiestEuMarket, readMarketSweep, WORLD_MARKETS } from "./markets.ts";
+import { parseAdDetail } from "./adDetail.ts";
 import {
+  activeAdvertiserPageUrl,
   advertiserPageUrl,
   brandOf,
   keywordSearchUrl,
@@ -34,6 +36,7 @@ import { buildIndex, buildSite } from "./site.ts";
 import { summariseVoice } from "./voice.ts";
 import type {
   Ad,
+  AdDetail,
   Advertiser,
   DistributionPicture,
   MarketReading,
@@ -52,6 +55,13 @@ const DEEP_RIVALS = 6;
  * rather than dropped quietly.
  */
 const SWEEP_ADVERTISERS = 4;
+
+/**
+ * How many of an advertiser's advertisements get their audience read. Each one
+ * is a request, and the library refuses a caller that asks too fast, so this is
+ * a budget. What it leaves out is named in the gaps.
+ */
+const DETAIL_ADS = 10;
 
 function log(message: string): void {
   process.stdout.write(`${message}\n`);
@@ -264,6 +274,56 @@ async function main(): Promise<void> {
     }
   }
 
+  /**
+   * The audience behind each advertisement: how many people it reached, which
+   * ages and genders it actually landed on, and who paid for it.
+   *
+   * Read from a market inside the European Union, because that is the only place
+   * the numbers are published. An advertiser running nothing in the Union has no
+   * audience to read, and asking somewhere else would return a card with no
+   * audience at all rather than an error.
+   */
+  const adDetails: AdDetail[] = [];
+  for (const advertiser of swept) {
+    const market = busiestEuMarket(marketSweep, advertiser.advertiserId);
+    if (!market) {
+      gaps.push(
+        `${advertiser.name} runs nothing in the European Union, so no reach, age or gender is published for them anywhere.`,
+      );
+      continue;
+    }
+    const theirAds = ads
+      .filter((ad) => ad.advertiserId === advertiser.advertiserId)
+      .slice(0, DETAIL_ADS);
+    if (theirAds.length === 0) continue;
+
+    log(`\n== reading the audience of ${theirAds.length} ${advertiser.name} advertisements, from ${market}`);
+    const bodies = await readAdDetailBodies(
+      activeAdvertiserPageUrl(advertiser.advertiserId, market),
+      theirAds.map((ad) => ad.libraryId),
+    ).catch((error: unknown) => {
+      gaps.push(`${advertiser.name}: the audience could not be read (${(error as Error).message}).`);
+      return new Map<string, string | null>();
+    });
+
+    let refused = 0;
+    for (const [libraryId, body] of bodies) {
+      const detail = body === null ? null : parseAdDetail(body, libraryId);
+      if (!detail) {
+        refused += 1;
+        continue;
+      }
+      adDetails.push(detail);
+      log(
+        `   ${libraryId}: reach ${detail.euTotalReach?.toLocaleString("en-GB") ?? "not published"}` +
+          `, targeted ${detail.targetedAgeMin ?? "?"} to ${detail.targetedAgeMax ?? "?"} ${detail.targetedGender ?? ""}`,
+      );
+    }
+    if (refused > 0) {
+      gaps.push(`${advertiser.name}: the audience was refused for ${refused} of ${bodies.size} advertisements read.`);
+    }
+  }
+
   log(`\n== reading ${deep.length} rival websites for platform presence`);
   const presence: PlatformPresence[] = [];
   for (const rival of deep) {
@@ -303,6 +363,7 @@ async function main(): Promise<void> {
     voice,
     categoryAdvertisers,
     marketSweep,
+    adDetails,
     gaps,
   };
 

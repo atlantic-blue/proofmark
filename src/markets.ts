@@ -39,6 +39,35 @@ export const WORLD_MARKETS: readonly string[] = [
 ];
 
 /**
+ * The markets where an advertisement carries an audience.
+ *
+ * Reach, age, gender and targeting are published because the Digital Services
+ * Act requires it, so they exist for a request made against a member state and
+ * nowhere else. Reading the detail of a Great Britain advertisement returns the
+ * copy and no audience at all, which is why the detail reader picks its market
+ * rather than taking the product's.
+ */
+export const EU_MARKETS: readonly string[] = [
+  "AT", "BE", "BG", "HR", "CY", "CZ", "DK", "EE", "FI", "FR", "DE", "GR", "HU", "IE",
+  "IT", "LV", "LT", "LU", "MT", "NL", "PL", "PT", "RO", "SK", "SI", "ES", "SE",
+];
+
+/**
+ * The market to read an advertiser's detail from: the one inside the Union
+ * where they run most. Null when they run nothing in the Union at all, in which
+ * case there is no audience to read and the reader must not invent one by
+ * asking somewhere else.
+ */
+export function busiestEuMarket(sweep: readonly MarketReading[], advertiserId: string): string | null {
+  const inside = sweep
+    .filter((reading) => reading.advertiserId === advertiserId)
+    .filter((reading) => EU_MARKETS.includes(reading.market))
+    .filter((reading) => (reading.liveAds ?? 0) > 0)
+    .sort((left, right) => (right.liveAds ?? 0) - (left.liveAds ?? 0));
+  return inside[0]?.market ?? null;
+}
+
+/**
  * Advertisements for every ten thousand lifetime ratings.
  *
  * The raw counts favour big countries, so a market with nine times the customers
