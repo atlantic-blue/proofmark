@@ -154,11 +154,19 @@ jobs:
           # Every competitor now has a page of its own, one folder deeper. A
           # page that 404s or falls back to the report would publish green
           # otherwise, because nothing above this ever asks for one.
-          rivals=$(node -e "const p=JSON.parse(require('fs').readFileSync('out/hush-log/picture.json','utf8'));process.stdout.write(p.advertisers.map(a=>a.rivalId).join(' '))")
+          #
+          # The list comes out of the page that was just served, not out of
+          # picture.json: the publish step deletes every json file before the
+          # sync, so reading one here fails with ENOENT after a successful
+          # deploy. Following the links a reader would click is also the
+          # stronger check, since it tests what is published rather than what
+          # the pipeline meant to publish.
+          rivals=$(grep -o 'href="\./[a-z0-9-]*/"' page.html | sed 's|href="\./||;s|/"||' | sort -u | tr '\n' ' ')
           if [ -z "$rivals" ]; then
-            echo "No competitor page was written, so the report has nothing to link to."
+            echo "The report links to no competitor page, so nothing below the rival list can be opened."
             exit 1
           fi
+          echo "the report links to: $rivals"
           for rival in $rivals; do
             rcode=$(curl -s -o rival.html -w "%{http_code}" "$url/hush-log/$rival/" || true)
             if [ "$rcode" != "200" ]; then
