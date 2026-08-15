@@ -336,3 +336,36 @@ test("more terms outranks a bigger count, because breadth is the category signal
     "three terms at two advertisements must beat two terms at ten",
   );
 });
+
+test("the report opens with the geography, so a one market finding is never read as the world", () => {
+  const report = buildReport({
+    ...PICTURE,
+    marketSweep: [
+      { market: "US", advertiserId: "1", liveAds: 70, ratings: 349104, formattedPrice: "Free" },
+      { market: "GB", advertiserId: "1", liveAds: 12, ratings: 33470, formattedPrice: "Free" },
+      { market: "IE", advertiserId: "1", liveAds: 0, ratings: 2085, formattedPrice: "Free" },
+    ],
+  });
+  assert.ok(
+    report.indexOf("## Where their market is") < report.indexOf("## How the category sells"),
+    "geography has to come before anything read in one country",
+  );
+  assert.match(report, /US is where they buy hardest, at 70 live/);
+  assert.match(report, /GB, the market read in depth below, carries 12 live advertisements/);
+  assert.match(report, /Live advertising in 2 of 3 markets read/);
+  assert.match(report, /IE: 2,085 ratings, nothing live/);
+  assert.match(report, /Neither number is money/);
+});
+
+test("a report with no sweep says so rather than staying silent about it", () => {
+  const report = buildReport(PICTURE);
+  assert.match(report, /No market sweep was run, so every finding below describes one country only/);
+});
+
+test("one live advertisement is written as one, not as 1 advertisements", () => {
+  const report = buildReport({
+    ...PICTURE,
+    marketSweep: [{ market: "GB", advertiserId: "1", liveAds: 1, ratings: 10, formattedPrice: "Free" }],
+  });
+  assert.match(report, /carries 1 live advertisement\./);
+});

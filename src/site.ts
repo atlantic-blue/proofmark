@@ -9,8 +9,9 @@
  * seeing the bursts on one axis, not by reading a column of numbers.
  */
 
-import type { Ad, DistributionPicture, ProvenHook } from "./types.ts";
+import type { Ad, DistributionPicture, MarketReading, ProvenHook } from "./types.ts";
 import { parseLibraryDate } from "./meta.ts";
+import { byCustomerBase, byPressure, pressurePer10k, summariseSweep } from "./markets.ts";
 
 const MAX_HOOKS = 14;
 const MAX_RIVALS = 14;
@@ -150,6 +151,125 @@ function hookCard(hook: ProvenHook, topCreatives: number): string {
         </div>
       </div>
     </article>`;
+}
+
+const MAX_PRESSURE_ROWS = 12;
+
+/**
+ * A bar with no measurement and no script. Ratings run on a square root scale
+ * because one market usually holds most of the customers, and on a linear scale
+ * every other market flattens into a line. The scale is named on the page, since
+ * a reader comparing two bars deserves to know they are not comparing distances.
+ */
+function bar(value: number, max: number, tone: string, root: boolean): string {
+  if (max <= 0) return `<span class="bar-track"></span>`;
+  const share = root ? Math.sqrt(value) / Math.sqrt(max) : value / max;
+  const width = Math.max(value > 0 ? 1.5 : 0, Math.min(100, share * 100));
+  return `<span class="bar-track"><span class="bar-fill ${tone}" style="width:${width.toFixed(2)}%"></span></span>`;
+}
+
+/**
+ * Five cells, always, in this order: country, ratings bar, ratings number,
+ * advertisements bar, advertisements number.
+ *
+ * The state of a market lives in its number cell rather than in place of a bar,
+ * so a narrow screen can drop both bars and still leave three complete columns.
+ * A row that loses cells instead of losing bars wraps, and a wrapped row puts a
+ * count under the wrong country.
+ */
+function marketRow(reading: MarketReading, maxRatings: number, maxAds: number): string {
+  const ratings = reading.ratings;
+  const ads = reading.liveAds;
+
+  const ratingsNumber =
+    ratings === null ? `<span class="market-none">no listing</span>` : ratings.toLocaleString("en-GB");
+  const adsNumber =
+    ads === null
+      ? `<span class="market-none">unread</span>`
+      : ads === 0
+        ? `<span class="market-none">none live</span>`
+        : String(ads);
+
+  return `<li>
+      <span class="market-cc">${escapeHtml(reading.market)}</span>
+      ${ratings === null ? `<span class="bar-track"></span>` : bar(ratings, maxRatings, "base", true)}
+      <span class="market-num">${ratingsNumber}</span>
+      ${ads === null || ads === 0 ? `<span class="bar-track"></span>` : bar(ads, maxAds, "ads", false)}
+      <span class="market-num">${adsNumber}</span>
+    </li>`;
+}
+
+/**
+ * Where the rival's customers are, against where the rival is buying.
+ *
+ * Both readings go on the page, including the one that argues with the other,
+ * because the raw counts and the counts divided by the base put the same market
+ * in opposite halves of the list and only showing the flattering one is a way of
+ * lying with two true numbers.
+ */
+function marketSection(picture: DistributionPicture): string {
+  const sweep = picture.marketSweep ?? [];
+  if (sweep.length === 0) return "";
+
+  const summary = summariseSweep(sweep);
+  const rows = byCustomerBase(sweep);
+  const maxRatings = Math.max(...rows.map((entry) => entry.ratings ?? 0), 0);
+  const maxAds = Math.max(...rows.map((entry) => entry.liveAds ?? 0), 0);
+  const lead = picture.advertisers[0];
+  const home = picture.product.market.toUpperCase();
+  const homeReading = sweep.find((entry) => entry.market === home) ?? null;
+
+  const pressure = byPressure(sweep);
+  const maxPressure = pressurePer10k(pressure[0] ?? sweep[0] as MarketReading) ?? 0;
+  const homePressure = homeReading ? pressurePer10k(homeReading) : null;
+  const homeRank = homeReading ? pressure.findIndex((entry) => entry.market === home) + 1 : 0;
+
+  const pressureRows = pressure
+    .slice(0, MAX_PRESSURE_ROWS)
+    .concat(homeRank > MAX_PRESSURE_ROWS && homeReading ? [homeReading] : [])
+    .map((entry) => {
+      const value = pressurePer10k(entry) ?? 0;
+      return `<li>
+        <span class="market-cc">${escapeHtml(entry.market)}</span>
+        ${bar(value, maxPressure, "ads", false)}
+        <span class="market-num">${value.toFixed(1)}</span>
+      </li>`;
+    })
+    .join("");
+
+  const homeLine =
+    homeReading && homeReading.liveAds !== null && summary.largestBase
+      ? `In ${escapeHtml(home)}, the market this report reads in depth, they run ${homeReading.liveAds} today. Their largest customer base is ${escapeHtml(summary.largestBase.market)}, at ${(summary.largestBase.ratings ?? 0).toLocaleString("en-GB")} ratings.`
+      : "";
+
+  const quiet = summary.quietWithCustomers
+    .slice(0, 8)
+    .map((entry) => `${escapeHtml(entry.market)} (${(entry.ratings ?? 0).toLocaleString("en-GB")})`)
+    .join(", ");
+
+  return `<section>
+    <h2>Where their market is</h2>
+    <p class="lede">${escapeHtml(lead?.name ?? "The closest rival")} counted in ${summary.marketsRead} markets. Advertisements say where they are buying today. Ratings say where their customers already are. The two do not sit in the same places, and picking one country to watch is how the wrong one gets picked. ${homeLine}</p>
+    <ul class="markets">
+      <li class="market-head">
+        <span class="market-cc">&nbsp;</span>
+        <span class="market-none">Ratings, lifetime (square root scale)</span>
+        <span class="market-num"></span>
+        <span class="market-none">Live advertisements</span>
+        <span class="market-num">&nbsp;</span>
+      </li>
+      ${rows.map((entry) => marketRow(entry, maxRatings, maxAds)).join("")}
+    </ul>
+    ${
+      pressureRows
+        ? `<h3>The reading that argues with it: advertisements per 10,000 ratings</h3>
+    <p class="lede">Raw counts favour a big country. Dividing one by the other reorders the list completely. A market with a small base scores high on a handful of advertisements, so this reading has its own distortion, and it is here to stop the first one being read alone.${homePressure !== null && homeRank > 0 ? ` ${escapeHtml(home)} ranks ${homeRank} of ${pressure.length} on it, at ${homePressure.toFixed(1)}.` : ""}</p>
+    <ul class="markets markets-narrow">${pressureRows}</ul>`
+        : ""
+    }
+    ${quiet ? `<p class="caveat">Customers and no campaign: ${quiet}. An absent campaign is not an absent audience.</p>` : ""}
+    <p class="caveat">Neither number is money. An advertisement count counts objects, and a buyer can spend more on twelve than on seventy. A rating count is a lifetime total that only rises, so it describes the installed base rather than demand this month. The library publishes no spend and no impressions for a commercial advertiser.</p>
+  </section>`;
 }
 
 function priceSection(picture: DistributionPicture): string {
@@ -359,6 +479,23 @@ a:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-
 .rival-name { font-weight: 600; }
 .rival-note { font-family: var(--mono); font-size: 12px; color: var(--text-soft); }
 .chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.markets { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 5px; }
+.markets li { display: grid; grid-template-columns: 30px 1fr 88px 150px 66px; gap: 10px; align-items: center; }
+.markets.markets-narrow li { grid-template-columns: 30px 1fr 54px; }
+.market-head { padding-bottom: 4px; border-bottom: 1px solid var(--line); margin-bottom: 3px; }
+.market-cc { font-family: var(--mono); font-size: 12px; letter-spacing: .06em; color: var(--text-soft); }
+.bar-track { display: block; height: 9px; background: var(--surface-sunk); border-radius: 2px; }
+.bar-fill { display: block; height: 9px; border-radius: 2px; }
+.bar-fill.base { background: var(--accent); }
+.bar-fill.ads { background: var(--warn); }
+.market-num { font-family: var(--mono); font-size: 12px; text-align: right; font-variant-numeric: tabular-nums; color: var(--text-soft); }
+.market-none { font-family: var(--mono); font-size: 11px; color: var(--text-soft); opacity: .75; white-space: nowrap; }
+/* Below this width five columns do not fit, so the bars go and the numbers stay.
+   Dropping cells instead would wrap a row and put a count under another country. */
+@media (max-width: 720px) {
+  .markets:not(.markets-narrow) li { grid-template-columns: 30px 1fr 62px; }
+  .markets:not(.markets-narrow) li > .bar-track { display: none; }
+}
 .themes { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 9px; }
 .themes li { display: grid; grid-template-columns: minmax(140px, 210px) 1fr 46px; gap: 12px; align-items: center; }
 .theme-name { font-size: 14px; }
@@ -379,6 +516,9 @@ a:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-
   .hook { grid-template-columns: 1fr; gap: 12px; }
   .themes li { grid-template-columns: 1fr 46px; }
   .theme-track { grid-column: 1 / -1; }
+  /* Matched on .markets li so it outranks the grid rule, which is more specific
+     than a bare .market-head and silently kept the header on screen. */
+  .markets li.market-head { display: none; }
 }
 @media (prefers-reduced-motion: reduce) { * { transition: none !important; animation: none !important; } }
 `;
@@ -405,7 +545,7 @@ export function buildSite(picture: DistributionPicture): string {
     <div class="eyebrow">Proofmark</div>
     <h1>What the competition does for distribution</h1>
     <p class="subtitle">${escapeHtml(picture.product.name)}: ${escapeHtml(picture.product.job)}</p>
-    <p class="provenance">Read ${escapeHtml(picture.readAt.slice(0, 10))} &middot; ${escapeHtml(picture.product.market.toUpperCase())} market &middot; searched: ${escapeHtml(picture.product.searchTerms.join(", "))}</p>
+    <p class="provenance">Read ${escapeHtml(picture.readAt.slice(0, 10))} &middot; ${escapeHtml(picture.product.market.toUpperCase())} in depth${(picture.marketSweep ?? []).length ? `, ${(picture.marketSweep ?? []).length} markets counted` : ""} &middot; searched: ${escapeHtml(picture.product.searchTerms.join(", "))}</p>
   </header>
 
   <div class="stats">
@@ -416,6 +556,8 @@ export function buildSite(picture: DistributionPicture): string {
     ${statCard(String(live), "still running")}
     ${statCard(lengths.length ? `${middle}d` : "n/a", "middle run length")}
   </div>
+
+  ${marketSection(picture)}
 
   <section>
     <h2>When they ran</h2>

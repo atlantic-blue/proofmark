@@ -76,6 +76,40 @@ export function advertiserPageUrl(advertiserId: string, market: string): string 
 }
 
 /**
+ * The same page filtered to what is running today.
+ *
+ * This is the only advertiser view that can be read in full. An all statuses
+ * view of a busy advertiser reports thousands of results and pages through a
+ * call the library rate limits, so it returns the first two dozen and stops. An
+ * active view of the same advertiser is a dozen or so and fits on one page, so
+ * a count taken from it is the whole count.
+ */
+export function activeAdvertiserPageUrl(advertiserId: string, market: string): string {
+  return (
+    "https://www.facebook.com/ads/library/?active_status=active&ad_type=all" +
+    `&country=${market.toUpperCase()}&view_all_page_id=${advertiserId}` +
+    "&search_type=page&media_type=all"
+  );
+}
+
+/**
+ * How many results the library says it has, which is not how many it will hand
+ * over. It writes "~3,500 results", or "1 result", or the empty state.
+ *
+ * Null means the count could not be read, and null is not zero. A page that
+ * never finished loading and an advertiser who runs nothing produce the same
+ * empty screen, so the difference has to be carried rather than guessed.
+ */
+export function parseResultCount(pageText: string): number | null {
+  if (/No ads match your search criteria/i.test(pageText)) return 0;
+  const match = pageText.match(/~?([\d,]+)\s+results?\b/);
+  const digits = match?.[1]?.replace(/,/g, "");
+  if (!digits) return null;
+  const count = Number(digits);
+  return Number.isFinite(count) ? count : null;
+}
+
+/**
  * The library writes a date in the reader's own order, and that order follows
  * where the request comes from rather than the market being searched. A laptop
  * in London reads "30 Dec 2025". A runner in a United States region reads
