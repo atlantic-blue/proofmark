@@ -19,8 +19,15 @@ export interface Product {
   /** The job it does, in one line. Used in the report, never in a search. */
   readonly job: string;
   readonly appleAppId?: string;
-  /** Two letter store and library market, lower case. */
+  /** Two letter store and library market, lower case. The market read in depth. */
   readonly market: string;
+  /**
+   * Every market the closest rival is counted in, so the report can answer where
+   * their market is rather than only what they do in ours. Defaults to
+   * WORLD_MARKETS. One market is a setting, and picking the wrong one is how a
+   * rival's quietest country got read as the whole category.
+   */
+  readonly worldMarkets?: readonly string[];
   /** What Apple calls the thing: "software" for iPhone, "macSoftware" for Mac. */
   readonly storeEntity: string;
   /** What a buyer would type. Drives rival discovery. */
@@ -138,6 +145,27 @@ export interface ProvenHook {
   readonly stillRunning: boolean;
 }
 
+/**
+ * One rival counted in one market. Two counts, and they answer different
+ * questions: how hard the rival is buying there today, and how many customers
+ * they already have there.
+ *
+ * Both numbers are nullable and null never means zero. An unread market and an
+ * empty market look identical on a page unless the type keeps them apart, and
+ * "they run nothing here" is a much stronger claim than "we did not get a
+ * number".
+ */
+export interface MarketReading {
+  /** Upper case two letter country, as the library and the store write it. */
+  readonly market: string;
+  readonly advertiserId: string;
+  /** Advertisements running today. Null when the count could not be read. */
+  readonly liveAds: number | null;
+  /** Lifetime ratings in that storefront, a proxy for the installed base. */
+  readonly ratings: number | null;
+  readonly formattedPrice: string | null;
+}
+
 /** Everything the pipeline learned about one product's competition. */
 export interface DistributionPicture {
   readonly product: Product;
@@ -150,5 +178,10 @@ export interface DistributionPicture {
   readonly voice: readonly VoiceOfCustomer[];
   /** Every advertiser seen against the product's search terms, whoever they are. */
   readonly categoryAdvertisers: readonly { platform: Platform; term: string; name: string; advertiserId: string; count: number }[];
+  /**
+   * The closest rival counted market by market. Absent on any picture written
+   * before the sweep existed, so every reader must treat it as optional.
+   */
+  readonly marketSweep?: readonly MarketReading[];
   readonly gaps: readonly string[];
 }
