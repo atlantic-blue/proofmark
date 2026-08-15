@@ -165,7 +165,12 @@ The pipeline writes `out/<productId>/index.html` as well as the markdown. It is 
 contained page: no script, no network, no build step, so it opens from a file, from a bucket, or
 anywhere that renders markup.
 
-The centre of it is a flight chart. Every advertisement captured is a bar on one shared date
+Each competitor matched to an advertiser account also gets a page of its own at
+`out/<productId>/<rivalId>/index.html`, linked from the rival list. It answers the questions in
+the order they get asked: who they are and where to go and look, where they advertise, where they
+buy, what they run, and who it actually reached.
+
+The centre of the product page is a flight chart. Every advertisement captured is a bar on one shared date
 axis, coloured by advertiser and outlined if it is still live, so "how long do these run" is
 answered by looking rather than by reading a column of numbers.
 
