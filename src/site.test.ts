@@ -188,3 +188,51 @@ test("the index lists every product report", () => {
   assert.match(index, /41 ads/);
   assert.match(buildIndex([]), /No report has been produced yet/);
 });
+
+const SWEEP = [
+  { market: "US", advertiserId: "149967288461419", liveAds: 70, ratings: 349104, formattedPrice: "Free" },
+  { market: "GB", advertiserId: "149967288461419", liveAds: 12, ratings: 33470, formattedPrice: "Free" },
+  { market: "TW", advertiserId: "149967288461419", liveAds: 0, ratings: 12175, formattedPrice: "Free" },
+  { market: "FI", advertiserId: "149967288461419", liveAds: 18, ratings: 473, formattedPrice: "Free" },
+  { market: "ZZ", advertiserId: "149967288461419", liveAds: null, ratings: null, formattedPrice: null },
+];
+
+test("a picture written before the sweep existed still renders", () => {
+  const page = buildSite(PICTURE);
+  assert.ok(!page.includes("Where their market is"), "no sweep means no market section");
+  assert.match(page, /GB in depth/);
+  assert.ok(!page.includes("markets counted"), "an absent sweep must not claim a market count");
+});
+
+test("the market section carries both orderings, because they disagree", () => {
+  const page = buildSite({ ...PICTURE, marketSweep: SWEEP });
+  assert.match(page, /Where their market is/);
+  assert.match(page, /GB in depth, 5 markets counted/);
+  assert.match(page, /advertisements per 10,000 ratings/);
+
+  // Raw counts put the United States first. Divided by the base, Finland leads
+  // and the United States is last. A page showing only one of them is a way of
+  // choosing the answer.
+  const raw = page.indexOf('<ul class="markets">');
+  const ranked = page.indexOf('markets markets-narrow');
+  assert.ok(raw > -1 && ranked > raw, "the raw ordering comes first, the counter reading after it");
+  assert.ok(page.indexOf(">US<", raw) < page.indexOf(">FI<", raw), "raw ordering leads with the largest base");
+  assert.ok(page.indexOf(">FI<", ranked) < page.indexOf(">US<", ranked), "pressure ordering leads with the smallest base");
+});
+
+test("an unread market never renders as a market running nothing", () => {
+  const page = buildSite({ ...PICTURE, marketSweep: SWEEP });
+  assert.match(page, /unread/);
+  assert.match(page, /none live/);
+});
+
+test("a market with customers and no campaign is named", () => {
+  const page = buildSite({ ...PICTURE, marketSweep: SWEEP });
+  assert.match(page, /Customers and no campaign: TW \(12,175\)/);
+});
+
+test("the page never claims the counts are money", () => {
+  const page = buildSite({ ...PICTURE, marketSweep: SWEEP });
+  assert.match(page, /Neither number is money/);
+  assert.match(page, /publishes no spend/);
+});

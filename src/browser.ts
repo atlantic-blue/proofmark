@@ -39,6 +39,74 @@ export async function sleep(ms: number): Promise<void> {
   await new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+/**
+ * Reads the rendered text of many addresses through one browser and one tab.
+ *
+ * A sweep across forty markets is forty page loads, and launching Chrome forty
+ * times costs more than the loads do. Nothing is scrolled, because the caller
+ * wants the header count rather than the cards, and images, video and fonts are
+ * refused because they are most of the bytes and none of the answer.
+ *
+ * Still one page at a time. Several driven browsers at once against one host
+ * reads as an attack.
+ */
+export async function readTexts(
+  urls: readonly string[],
+  options: { readonly waitFor?: RegExp; readonly settleMs?: number; readonly gapMs?: number } = {},
+): Promise<(string | null)[]> {
+  const waitFor = options.waitFor ?? /results|No ads match your search criteria/i;
+  const settleMs = options.settleMs ?? 1500;
+  const gapMs = options.gapMs ?? 1200;
+
+  const browser = await puppeteer.launch({
+    executablePath: CHROME_PATH,
+    headless: true,
+    args: ["--no-sandbox", "--disable-blink-features=AutomationControlled"],
+    defaultViewport: { width: 1440, height: 1200 },
+  });
+
+  const texts: (string | null)[] = [];
+  try {
+    const page = await browser.newPage();
+    await page.setUserAgent(USER_AGENT);
+    await page.setRequestInterception(true);
+    page.on("request", (request) => {
+      const kind = request.resourceType();
+      const decision = kind === "image" || kind === "media" || kind === "font" ? request.abort() : request.continue();
+      decision.catch(() => {
+        // A request that was already handled is not a finding.
+      });
+    });
+
+    for (const url of urls) {
+      try {
+        await page.goto(url, { waitUntil: "domcontentloaded", timeout: 60_000 });
+        // The count arrives after the first results call, and the network on
+        // this page never goes quiet, so wait for the words rather than for
+        // idleness.
+        await page
+          .waitForFunction(
+            (pattern: string) => new RegExp(pattern, "i").test(document.body.innerText),
+            { timeout: 30_000 },
+            waitFor.source,
+          )
+          .catch(() => {
+            // A market that never shows a count is recorded as unread below.
+          });
+        await sleep(settleMs);
+        texts.push(await page.evaluate(() => document.body.innerText));
+      } catch {
+        texts.push(null);
+      }
+      await sleep(gapMs);
+    }
+  } finally {
+    await Promise.race([browser.close(), sleep(10_000)]);
+  }
+
+  return texts;
+}
+
 export async function render(url: string, options: RenderOptions = {}): Promise<RenderResult> {
   const scrolls = options.scrolls ?? 8;
   const settleMs = options.settleMs ?? 3000;

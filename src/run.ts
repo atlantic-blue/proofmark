@@ -15,8 +15,9 @@
 
 import { mkdir, readdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
-import { collectReviews, discoverRivals } from "./apple.ts";
-import { render } from "./browser.ts";
+import { collectReviews, discoverRivals, lookupApp } from "./apple.ts";
+import { readTexts, render } from "./browser.ts";
+import { readMarketSweep, WORLD_MARKETS } from "./markets.ts";
 import {
   advertiserPageUrl,
   brandOf,
@@ -31,7 +32,15 @@ import { readPresence } from "./platforms.ts";
 import { buildReport } from "./report.ts";
 import { buildIndex, buildSite } from "./site.ts";
 import { summariseVoice } from "./voice.ts";
-import type { Ad, Advertiser, DistributionPicture, PlatformPresence, Product, VoiceOfCustomer } from "./types.ts";
+import type {
+  Ad,
+  Advertiser,
+  DistributionPicture,
+  MarketReading,
+  PlatformPresence,
+  Product,
+  VoiceOfCustomer,
+} from "./types.ts";
 
 /** How many rivals get the expensive treatment: a library search and a review sweep. */
 const DEEP_RIVALS = 6;
@@ -184,6 +193,38 @@ async function main(): Promise<void> {
     gaps.push("No advertisement copy was captured for any rival, so no hook could be ranked.");
   }
 
+  /**
+   * The sweep covers the closest matched rival only. It is one page load per
+   * market, so running it for every rival would multiply the slowest stage in
+   * the pipeline by six for a question one rival answers.
+   */
+  const worldMarkets = product.worldMarkets ?? WORLD_MARKETS;
+  const lead = advertisers[0];
+  let marketSweep: MarketReading[] = [];
+  if (!lead) {
+    gaps.push("No rival was matched to an advertiser account, so no market sweep could be run.");
+  } else {
+    const leadRival = rivals.find((rival) => rival.rivalId === lead.rivalId);
+    log(`\n== counting ${lead.name} in ${worldMarkets.length} markets`);
+    marketSweep = await readMarketSweep(
+      { readTexts, lookupApp },
+      {
+        advertiserId: lead.advertiserId,
+        appleAppId: leadRival?.appleAppId ?? null,
+        markets: worldMarkets,
+        onMarket: (reading) =>
+          log(
+            `   ${reading.market}: ${reading.liveAds === null ? "unread" : `${reading.liveAds} live`}` +
+              `, ${reading.ratings === null ? "ratings not published" : `${reading.ratings.toLocaleString("en-GB")} ratings`}`,
+          ),
+      },
+    );
+    const unread = marketSweep.filter((reading) => reading.liveAds === null).map((reading) => reading.market);
+    if (unread.length > 0) {
+      gaps.push(`The advertisement count could not be read in ${unread.length} markets: ${unread.join(", ")}.`);
+    }
+  }
+
   log(`\n== reading ${deep.length} rival websites for platform presence`);
   const presence: PlatformPresence[] = [];
   for (const rival of deep) {
@@ -222,6 +263,7 @@ async function main(): Promise<void> {
     presence,
     voice,
     categoryAdvertisers,
+    marketSweep,
     gaps,
   };
 

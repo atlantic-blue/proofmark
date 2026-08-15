@@ -16,21 +16,25 @@ node --experimental-strip-types src/run.ts products/hush-log.json --report-only
 
 ## What it answers
 
-For one product, in one market:
+For one product, read in depth in one market and counted in every market:
 
 1. **Who the rivals are.** Found by searching what a buyer would type, not by a list somebody
    wrote by hand.
-2. **How the category sells.** Free to install or paid, and what they charge after. This comes
-   first in the report because it decides whether any advertisement can work.
-3. **Where they buy.** Read from each rival's own site and the public tag container behind it,
+2. **Where their market is.** The closest rival counted in every market, so the report can say
+   where they buy and where their customers already are. The two are not the same places.
+   Reading one country and calling it the category is how a rival's quietest market got read as
+   the whole picture.
+3. **How the category sells.** Free to install or paid, and what they charge after. This comes
+   early in the report because it decides whether any advertisement can work.
+4. **Where they buy.** Read from each rival's own site and the public tag container behind it,
    then confirmed against the advertisement library, which is stronger evidence.
-4. **What they say, and what they put behind it.** Advertisement copy grouped by hook and ranked
+5. **What they say, and what they put behind it.** Advertisement copy grouped by hook and ranked
    by how many creatives share it.
-5. **Who else bids on those words.** Every advertiser the library reports for the product's own
+6. **Who else bids on those words.** Every advertiser the library reports for the product's own
    search terms, including ones nobody had heard of.
-6. **What their customers are angry about.** Complaint themes counted across their low star
+7. **What their customers are angry about.** Complaint themes counted across their low star
    reviews.
-7. **What could not be read.** Always printed, never hidden.
+8. **What could not be read.** Always printed, never hidden.
 
 ## The stages
 
@@ -40,6 +44,8 @@ flowchart TD
   D --> C["Ad library keyword search: who bids on these words"]
   C --> M["Match each rival to an advertiser account"]
   M --> A["Read that advertiser's advertisements"]
+  M --> S["Count the closest rival in every market"]
+  S --> R
   A --> H["Group by hook, rank by creatives behind it"]
   D --> W["Read each rival site: which platforms they measure"]
   D --> V["Read each rival's reviews: count the complaints"]
@@ -87,6 +93,10 @@ One file in `products/`. Nothing else.
 `brandTerms` stops the product listing itself as its own rival. `storeEntity` is `software` for
 iPhone and `macSoftware` for Mac.
 
+`market` is the country read in depth: its store, its reviews, its advertisement copy. Add
+`worldMarkets` to change the countries the closest rival is counted in. It defaults to the forty
+in `WORLD_MARKETS`.
+
 ## What it costs
 
 Nothing. No key, no account, no paid data provider.
@@ -109,8 +119,12 @@ Stated in every report, because a silent gap reads like a finding.
 - **Only Meta is wired in.** Google Ads Transparency answers a browser but its search payload
   shape is unsolved. The TikTok Europe library answers and its payload shape is unknown. TikTok
   Creative Center refuses with "no permission".
-- **The library does not paginate from a scrolling window**, so a rival with 150 advertisements
-  gives up its most recent 17. Reaching the rest needs a different mechanism.
+- **The library refuses to page.** The scroll fires a call named
+  `AdLibrarySearchPaginationQuery`, and that call answers `Rate limit exceeded`, code 1675004,
+  from the first page onward. The page then renders nothing more and says nothing, so a reader
+  gets the first two dozen cards of an advertiser who has thousands. Waiting between calls did
+  not help. This is why the market sweep counts the **active** view, which is small enough to
+  arrive whole.
 - **Apple withholds the rating count for most Mac applications** while still serving their
   reviews. CleanMyMac reports no rating count and 500 reviews. The report says "ratings not
   published" rather than printing a zero, because a zero would read as "nobody rated it".

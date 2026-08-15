@@ -1,12 +1,14 @@
 /**
  * Turns a distribution picture into the document a human reads.
  *
- * The order is deliberate. Price model first, because how a category sells is a
- * distribution fact and it decides whether any advertisement can work. Then
+ * The order is deliberate. Geography first, because everything under it is one
+ * market deep and the reader has to know which one. Then the price model,
+ * because how a category sells decides whether any advertisement can work. Then
  * where the money goes, then what they say, then who else is bidding, then what
  * their customers are angry about. Gaps last and never hidden.
  */
 
+import { byCustomerBase, summariseSweep } from "./markets.ts";
 import type { DistributionPicture } from "./types.ts";
 
 /**
@@ -65,6 +67,57 @@ function priceModel(picture: DistributionPicture): string {
     "",
     ...rows,
     ...ratingsNote,
+  ]);
+}
+
+/**
+ * Where the rival sells against where the rival is buying.
+ *
+ * Written before everything else, because every section under it is one market
+ * deep and a reader needs to know which market that is and how much of the
+ * rival's world it leaves out.
+ */
+function whereTheirMarketIs(picture: DistributionPicture): string {
+  const sweep = picture.marketSweep ?? [];
+  if (sweep.length === 0) {
+    return line([
+      "## Where their market is",
+      "",
+      "No market sweep was run, so every finding below describes one country only.",
+    ]);
+  }
+
+  const summary = summariseSweep(sweep);
+  const home = picture.product.market.toUpperCase();
+  const homeReading = sweep.find((entry) => entry.market === home);
+  const rows = byCustomerBase(sweep)
+    .slice(0, 15)
+    .map((entry) => {
+      const ratings = entry.ratings === null ? "no store listing" : `${entry.ratings.toLocaleString("en-GB")} ratings`;
+      const ads = entry.liveAds === null ? "count unread" : entry.liveAds === 0 ? "nothing live" : `${entry.liveAds} live`;
+      return `- ${entry.market}: ${ratings}, ${ads}`;
+    });
+
+  const homeLine =
+    homeReading && homeReading.liveAds !== null
+      ? `${home}, the market read in depth below, carries ${plural(homeReading.liveAds, "live advertisements", "live advertisement")}.`
+      : `${home} is the market read in depth below.`;
+
+  return line([
+    "## Where their market is",
+    "",
+    `${summary.busiest?.market ?? "No market"} is where they buy hardest, at ${summary.busiest?.liveAds ?? 0} live.`,
+    `${summary.largestBase?.market ?? "No market"} holds the most customers, at ` +
+      `${(summary.largestBase?.ratings ?? 0).toLocaleString("en-GB")} ratings.`,
+    homeLine,
+    "",
+    `Live advertising in ${summary.marketsWithAds} of ${summary.marketsRead} markets read.`,
+    "",
+    ...rows,
+    "",
+    "Neither number is money. An advertisement count counts objects, not budget, and a rating",
+    "count is a lifetime total that only rises. The library publishes no spend and no impressions",
+    "for a commercial advertiser.",
   ]);
 }
 
@@ -334,6 +387,8 @@ export function buildReport(picture: DistributionPicture): string {
     `Produced by Proofmark from ${picture.product.productId}.json. Every number traces to a request.`,
     "",
     `The product: ${picture.product.job}`,
+    "",
+    whereTheirMarketIs(picture),
     "",
     priceModel(picture),
     "",
